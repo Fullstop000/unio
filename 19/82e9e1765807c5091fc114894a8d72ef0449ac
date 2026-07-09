@@ -1,0 +1,16 @@
+AGENTS.md
+  h_246cad2f1fb7aa 1-32
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "1982e9e1765807c5091fc114894a8d72ef0449ac",
+  "prompts": {},
+  "humans": {
+    "h_246cad2f1fb7aa": {
+      "author": "Fullstop000 <fullstop1005@gmail.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
