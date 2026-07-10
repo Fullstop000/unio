@@ -1,0 +1,27 @@
+driver/acp/config.go
+  s_603ee6dacfd6ff::t_7519be215f931f 27,70-72
+driver/acp/driver_test.go
+  s_603ee6dacfd6ff::t_48b557760bae57 42,45-47,78-116
+driver/acp/session.go
+  s_603ee6dacfd6ff::t_251fcf3f5fe92b 133-142
+tests/real_acp_test.go
+  s_603ee6dacfd6ff::t_2a8cdcb71024dc 17-18,115,159-184
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "9f7d63ecd8ddd7362dafaa7deccccfc35d35025d",
+  "prompts": {},
+  "sessions": {
+    "s_603ee6dacfd6ff": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4b1f-b12a-75c1-af02-0c3edd4900ad",
+        "model": "unknown"
+      },
+      "human_author": "Fullstop000 <fullstop1005@gmail.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
