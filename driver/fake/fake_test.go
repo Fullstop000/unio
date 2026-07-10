@@ -170,6 +170,70 @@ func TestFakeInterruptIdleIsNoop(t *testing.T) {
 	}
 }
 
+func TestFakeBlockedTurnContinues(t *testing.T) {
+	d := New()
+	key := driver.SessionKey("blocked")
+	d.ScriptSession(key,
+		Script{Blocked: &driver.BlockedReason{
+			Kind: driver.BlockedToolApproval,
+			Options: []driver.BlockOption{
+				{Value: "allow_once", Label: "Allow once"},
+				{Value: "deny", Label: "Deny"},
+			},
+		}},
+		Script{Items: []driver.AgentEventItem{{Kind: driver.ItemText, Text: "continued"}}},
+	)
+	att, _ := d.OpenSession(context.Background(), key, driver.AgentSpec{}, driver.OpenParams{})
+	events := att.Events.Subscribe()
+	_ = att.Session.Run(context.Background(), nil)
+	run, _ := att.Session.Prompt(context.Background(), driver.PromptReq{Text: "go"})
+	ev := waitRunEvent(t, events, run, driver.EventBlocked)
+	if ev.Blocked == nil || ev.Blocked.Kind != driver.BlockedToolApproval {
+		t.Fatalf("unexpected block: %+v", ev)
+	}
+
+	continued, err := att.Session.Continue(context.Background(), "allow_once")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitRunEvent(t, events, continued, driver.EventCompleted)
+}
+
+func TestFakeInterruptHeldTurn(t *testing.T) {
+	gate := make(chan struct{})
+	d := New()
+	key := driver.SessionKey("held")
+	d.ScriptSession(key, Script{Wait: gate})
+	att, _ := d.OpenSession(context.Background(), key, driver.AgentSpec{}, driver.OpenParams{})
+	events := att.Events.Subscribe()
+	_ = att.Session.Run(context.Background(), nil)
+	run, _ := att.Session.Prompt(context.Background(), driver.PromptReq{Text: "long"})
+	if err := att.Session.Interrupt(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	ev := waitRunEvent(t, events, run, driver.EventCompleted)
+	if ev.Result.FinishReason != driver.FinishCancelled {
+		t.Fatalf("finish = %q", ev.Result.FinishReason)
+	}
+	close(gate)
+}
+
+func waitRunEvent(t *testing.T, events <-chan driver.AgentEvent, run driver.RunID, typ driver.EventType) driver.AgentEvent {
+	t.Helper()
+	timer := time.NewTimer(2 * time.Second)
+	defer timer.Stop()
+	for {
+		select {
+		case ev := <-events:
+			if ev.RunID == run && ev.Type == typ {
+				return ev
+			}
+		case <-timer.C:
+			t.Fatalf("timed out waiting for %s on run %s", typ, run)
+		}
+	}
+}
+
 func TestFakeNotInstalled(t *testing.T) {
 	d := New()
 	d.SetRequireInstall(true)

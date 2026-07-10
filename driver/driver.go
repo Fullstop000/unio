@@ -64,6 +64,8 @@ const (
 	PhaseActive Phase = "active"
 	// PhasePromptInFlight: a prompt is currently executing on the live session.
 	PhasePromptInFlight Phase = "prompt_in_flight"
+	// PhaseBlocked: a prompt is paused awaiting external intervention.
+	PhaseBlocked Phase = "blocked"
 	// PhaseClosed: the handle has been closed and cannot be reused.
 	PhaseClosed Phase = "closed"
 	// PhaseFailed: the handle is in a non-recoverable error state.
