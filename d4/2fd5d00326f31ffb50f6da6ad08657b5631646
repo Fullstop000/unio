@@ -1,0 +1,23 @@
+agent.go
+  s_0b0f8a8fcdf726::t_7078822c416ff0 7,23,57,68,97,100,124,157,160
+session.go
+  s_0b0f8a8fcdf726::t_624363e4f86d9c 61,133,189
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d42fd5d00326f31ffb50f6da6ad08657b5631646",
+  "prompts": {},
+  "sessions": {
+    "s_0b0f8a8fcdf726": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4a17-3b3b-76c1-90ac-be1a039189b7",
+        "model": "unknown"
+      },
+      "human_author": "Fullstop000 <fullstop1005@gmail.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
