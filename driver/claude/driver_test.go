@@ -3,6 +3,7 @@ package claude
 import (
 	"bufio"
 	"context"
+	"errors"
 	"io"
 	"os"
 	"strings"
@@ -23,11 +24,15 @@ type scriptedTransport struct {
 	mu      sync.Mutex
 	written []string
 	closed  chan struct{}
+	waited  chan struct{}
 }
 
 func newScriptedTransport(lines []string) *scriptedTransport {
 	pr, pw := io.Pipe()
-	return &scriptedTransport{lines: lines, pr: pr, pw: pw, closed: make(chan struct{})}
+	return &scriptedTransport{
+		lines: lines, pr: pr, pw: pw,
+		closed: make(chan struct{}), waited: make(chan struct{}),
+	}
 }
 
 func (s *scriptedTransport) stdin() io.Writer { return &captureWriter{s: s} }
@@ -38,6 +43,7 @@ func (s *scriptedTransport) stdout() *bufio.Scanner {
 
 func (s *scriptedTransport) wait() error {
 	<-s.closed
+	close(s.waited)
 	return nil
 }
 
@@ -238,12 +244,51 @@ func TestClaudeInterruptKillsTurnAsCancelled(t *testing.T) {
 	if err := att.Session.Interrupt(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+	select {
+	case <-tr.waited:
+	case <-time.After(time.Second):
+		t.Fatal("Interrupt returned before the child was reaped")
+	}
 	evs := collect(t, events, func(ev driver.AgentEvent) bool {
 		return ev.Type == driver.EventCompleted && ev.RunID == run
 	}, 2*time.Second)
 	last := evs[len(evs)-1]
 	if last.Result.FinishReason != driver.FinishCancelled {
 		t.Fatalf("finish = %q; want cancelled", last.Result.FinishReason)
+	}
+}
+
+func TestClaudeProcessLifetimeDoesNotUseTurnContext(t *testing.T) {
+	tr := newScriptedTransport(nil)
+	var factoryCtx context.Context
+	d := newWithTransport(func(ctx context.Context, _ string, _ []string, _ driver.AgentSpec) (transport, error) {
+		factoryCtx = ctx
+		return tr, nil
+	})
+	att, err := d.OpenSession(context.Background(), "lifetime", driver.AgentSpec{ExecutablePath: fakeInstalledBinary(t)}, driver.OpenParams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	if err := att.Session.Run(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	if err := factoryCtx.Err(); err != nil {
+		t.Fatalf("process context was cancelled with turn context: %v", err)
+	}
+	_ = att.Session.Close(context.Background())
+}
+
+func TestClaudeMissingResumeDoesNotStartFresh(t *testing.T) {
+	original := fileExists
+	fileExists = func(string) bool { return false }
+	t.Cleanup(func() { fileExists = original })
+	d := New()
+	_, err := d.OpenSession(context.Background(), "resume", driver.AgentSpec{ExecutablePath: fakeInstalledBinary(t), Cwd: "/repo"}, driver.OpenParams{ResumeSessionID: "missing"})
+	var agentErr *driver.AgentError
+	if !errors.As(err, &agentErr) || agentErr.Kind != driver.ErrSessionNotFound {
+		t.Fatalf("resume error = %v", err)
 	}
 }
 
@@ -296,23 +341,15 @@ func TestClaudeDriverNonStreamingCompleteMessage(t *testing.T) {
 	_ = att.Session.Close(context.Background())
 }
 
-func TestClaudeArgsResumeGuard(t *testing.T) {
-	// With no on-disk transcript, --resume must be omitted (liveness guard).
+func TestClaudeArgsKeepExplicitResumeID(t *testing.T) {
 	origExists := fileExists
 	fileExists = func(string) bool { return false }
 	defer func() { fileExists = origExists }()
 
 	h := &handle{spec: driver.AgentSpec{Cwd: "/tmp/x"}, resume: "prior-id"}
 	args := h.buildArgs()
-	if containsArg(args, "--resume") {
-		t.Fatalf("resume should be skipped when transcript is missing: %v", args)
-	}
-
-	// With the transcript present, --resume prior-id is added.
-	fileExists = func(string) bool { return true }
-	args = h.buildArgs()
 	if !containsArg(args, "--resume") || !containsArg(args, "prior-id") {
-		t.Fatalf("resume should be added when transcript exists: %v", args)
+		t.Fatalf("explicit resume ID must never silently become a fresh session: %v", args)
 	}
 }
 

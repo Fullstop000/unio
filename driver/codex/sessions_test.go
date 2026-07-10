@@ -28,7 +28,7 @@ func TestListSessionsReadsCodexHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got[0].SessionID != "thread-1" || got[0].Title != "Refactor auth" || got[0].Cwd != "/repo/api" || got[0].MessageCount != 2 {
+	if len(got) != 1 || got[0].SessionID != "thread-1" || got[0].Title != "Refactor auth" || got[0].Cwd != "/repo/api" || got[0].MessageCount != 2 || got[0].UpdatedAt.IsZero() {
 		t.Fatalf("sessions = %+v", got)
 	}
 }

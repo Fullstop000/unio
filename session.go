@@ -12,18 +12,20 @@ import (
 type Session struct {
 	agent *Agent
 	key   driver.SessionKey
+	opMu  sync.Mutex
 
 	mu            sync.Mutex
 	state         SessionState
 	id            string
+	cwd           string
 	inner         driver.Session
 	events        <-chan driver.AgentEvent
 	active        *Stream
 	closedByAgent bool
 }
 
-func newSession(agent *Agent, id string) *Session {
-	return &Session{agent: agent, key: autoKey(agent.kind), id: id, state: Idle}
+func newSession(agent *Agent, id, cwd string) *Session {
+	return &Session{agent: agent, key: autoKey(agent.kind), id: id, cwd: cwd, state: Idle}
 }
 
 // ID returns the runtime-owned session ID. A new session has no runtime ID
@@ -53,6 +55,8 @@ func (s *Session) Run(ctx context.Context, prompt string) (Result, error) {
 
 // Stream sends one prompt and returns its live event stream.
 func (s *Session) Stream(ctx context.Context, prompt string) (*Stream, error) {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
 	s.mu.Lock()
 	if s.closedByAgent || s.agent.isClosed() {
 		s.mu.Unlock()
@@ -95,7 +99,11 @@ func (s *Session) ensureAttached(ctx context.Context) error {
 	resumeID := s.id
 	s.mu.Unlock()
 
-	att, err := s.agent.driver.OpenSession(ctx, s.key, s.agent.cfg.spec(), driver.OpenParams{ResumeSessionID: resumeID})
+	spec := s.agent.cfg.spec()
+	if s.cwd != "" {
+		spec.Cwd = s.cwd
+	}
+	att, err := s.agent.driver.OpenSession(ctx, s.key, spec, driver.OpenParams{ResumeSessionID: resumeID})
 	if err != nil {
 		return err
 	}
@@ -126,8 +134,11 @@ func (s *Session) ensureAttached(ctx context.Context) error {
 // Interrupt stops the current running or blocked turn. It is an idempotent
 // no-op while idle.
 func (s *Session) Interrupt(ctx context.Context) error {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
 	s.mu.Lock()
-	if s.state == Idle {
+	state := s.state
+	if state == Idle {
 		s.mu.Unlock()
 		return nil
 	}
@@ -147,16 +158,25 @@ func (s *Session) Interrupt(ctx context.Context) error {
 		}
 		s.mu.Unlock()
 	}
-	s.setState(Idle)
+	if state == Blocked {
+		s.setState(Idle)
+	}
 	return nil
 }
 
 // Continue supplies input requested by a blocked turn and waits for the agent
 // to complete, block again, or be interrupted.
 func (s *Session) Continue(ctx context.Context, input string) (Result, error) {
+	s.opMu.Lock()
 	s.mu.Lock()
+	if s.closedByAgent || s.agent.isClosed() {
+		s.mu.Unlock()
+		s.opMu.Unlock()
+		return Result{}, errs.InvalidState("agent is closed")
+	}
 	if s.state != Blocked {
 		s.mu.Unlock()
+		s.opMu.Unlock()
 		return Result{}, errs.InvalidState("continue requires a blocked session")
 	}
 	s.state = Running
@@ -166,12 +186,14 @@ func (s *Session) Continue(ctx context.Context, input string) (Result, error) {
 	runID, err := inner.Continue(ctx, input)
 	if err != nil {
 		s.setState(Blocked)
+		s.opMu.Unlock()
 		return Result{}, err
 	}
 	stream := newStream(ctx, s, events, runID)
 	s.mu.Lock()
 	s.active = stream
 	s.mu.Unlock()
+	s.opMu.Unlock()
 	return stream.Result()
 }
 
@@ -189,12 +211,19 @@ func (s *Session) setID(id string) error {
 		return nil
 	}
 	s.mu.Lock()
+	if s.id != "" && s.id != id {
+		old := s.id
+		s.mu.Unlock()
+		return errs.InvalidState("runtime session ID changed from " + old + " to " + id)
+	}
 	s.id = id
 	s.mu.Unlock()
 	return s.agent.register(s, id)
 }
 
 func (s *Session) closeAttachment(ctx context.Context) error {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
 	s.mu.Lock()
 	s.closedByAgent = true
 	inner := s.inner
@@ -208,6 +237,8 @@ func (s *Session) closeAttachment(ctx context.Context) error {
 }
 
 func (s *Session) dropAttachment() {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
 	s.mu.Lock()
 	inner := s.inner
 	s.inner = nil

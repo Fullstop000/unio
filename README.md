@@ -56,6 +56,8 @@ result, err := stream.Result()
 
 Call `session.Interrupt(ctx)` from another goroutine to stop a running turn.
 Interrupt is normal control flow; the waiting result has `Interrupted == true`.
+When using `Stream`, drain `stream.Result()` before starting the next turn so
+the interrupted turn's terminal event is finalized.
 
 ## Blocked turns
 

@@ -3,6 +3,7 @@ package unio
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -221,6 +222,50 @@ type blockingOpenDriver struct {
 	release chan struct{}
 }
 
+type blockingPromptDriver struct {
+	driver.ProtocolDriver
+	started chan struct{}
+	release chan struct{}
+}
+
+type recordingSpecDriver struct {
+	driver.ProtocolDriver
+	mu   sync.Mutex
+	spec driver.AgentSpec
+}
+
+func (d *recordingSpecDriver) OpenSession(ctx context.Context, key driver.SessionKey, spec driver.AgentSpec, params driver.OpenParams) (*driver.SessionAttachment, error) {
+	d.mu.Lock()
+	d.spec = spec
+	d.mu.Unlock()
+	return d.ProtocolDriver.OpenSession(ctx, key, spec, params)
+}
+
+func (d *blockingPromptDriver) OpenSession(ctx context.Context, key driver.SessionKey, spec driver.AgentSpec, params driver.OpenParams) (*driver.SessionAttachment, error) {
+	att, err := d.ProtocolDriver.OpenSession(ctx, key, spec, params)
+	if err != nil {
+		return nil, err
+	}
+	att.Session = &blockingPromptSession{Session: att.Session, started: d.started, release: d.release}
+	return att, nil
+}
+
+type blockingPromptSession struct {
+	driver.Session
+	started chan struct{}
+	release chan struct{}
+}
+
+func (s *blockingPromptSession) Prompt(ctx context.Context, req driver.PromptReq) (driver.RunID, error) {
+	close(s.started)
+	select {
+	case <-s.release:
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+	return s.Session.Prompt(ctx, req)
+}
+
 func (d *blockingOpenDriver) OpenSession(ctx context.Context, key driver.SessionKey, spec driver.AgentSpec, params driver.OpenParams) (*driver.SessionAttachment, error) {
 	close(d.started)
 	select {
@@ -248,12 +293,17 @@ func TestAgentCloseCannotRaceInANewAttachment(t *testing.T) {
 		done <- err
 	}()
 	<-blocking.started
-	if err := agent.Close(); err != nil {
-		t.Fatal(err)
+	closeDone := make(chan error, 1)
+	go func() { closeDone <- agent.Close() }()
+	select {
+	case err := <-closeDone:
+		t.Fatalf("Agent.Close returned while OpenSession was in flight: %v", err)
+	case <-time.After(20 * time.Millisecond):
 	}
 	close(blocking.release)
-	if err := <-done; !errors.Is(err, ErrInvalidState) {
-		t.Fatalf("run error = %v; want invalid_state", err)
+	<-done
+	if err := <-closeDone; err != nil {
+		t.Fatal(err)
 	}
 	session.mu.Lock()
 	inner := session.inner
@@ -261,6 +311,83 @@ func TestAgentCloseCannotRaceInANewAttachment(t *testing.T) {
 	if inner != nil {
 		t.Fatal("closed agent retained an attachment opened by a racing Run")
 	}
+}
+
+func TestAgentCloseWaitsForPromptSubmission(t *testing.T) {
+	fd := fake.New()
+	blocking := &blockingPromptDriver{ProtocolDriver: fd, started: make(chan struct{}), release: make(chan struct{})}
+	prev := driverOverride
+	driverOverride = func(AgentKind) (driver.ProtocolDriver, bool) { return blocking, true }
+	t.Cleanup(func() { driverOverride = prev })
+	agent, err := New(Claude)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, _ := agent.NewSession(context.Background())
+	streamDone := make(chan error, 1)
+	go func() {
+		_, err := session.Stream(context.Background(), "hello")
+		streamDone <- err
+	}()
+	<-blocking.started
+	closeDone := make(chan error, 1)
+	go func() { closeDone <- agent.Close() }()
+	select {
+	case err := <-closeDone:
+		t.Fatalf("Agent.Close returned during Prompt submission: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(blocking.release)
+	if err := <-streamDone; err != nil {
+		t.Fatalf("Stream submission: %v", err)
+	}
+	if err := <-closeDone; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestInterruptWaitsForPromptSubmission(t *testing.T) {
+	fd := fake.New()
+	blocking := &blockingPromptDriver{ProtocolDriver: fd, started: make(chan struct{}), release: make(chan struct{})}
+	prev := driverOverride
+	driverOverride = func(AgentKind) (driver.ProtocolDriver, bool) { return blocking, true }
+	t.Cleanup(func() { driverOverride = prev })
+	agent, err := New(Claude)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer agent.Close()
+	session, _ := agent.NewSession(context.Background())
+	streamDone := make(chan *Stream, 1)
+	go func() {
+		stream, _ := session.Stream(context.Background(), "hello")
+		streamDone <- stream
+	}()
+	<-blocking.started
+	interruptDone := make(chan error, 1)
+	go func() { interruptDone <- session.Interrupt(context.Background()) }()
+	var early error
+	returnedEarly := false
+	select {
+	case err := <-interruptDone:
+		early = err
+		returnedEarly = true
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(blocking.release)
+	stream := <-streamDone
+	if returnedEarly {
+		t.Fatalf("Interrupt returned before Prompt submission: %v", early)
+	}
+	if !returnedEarly {
+		if err := <-interruptDone; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if stream == nil {
+		t.Fatal("Stream submission failed")
+	}
+	_, _ = stream.Result()
 }
 
 func TestTransportClosedTurnReturnsError(t *testing.T) {
@@ -271,5 +398,78 @@ func TestTransportClosedTurnReturnsError(t *testing.T) {
 	_, err := session.Run(context.Background(), "hello")
 	if kind, ok := errs.KindOf(err); !ok || kind != errs.KindTransport {
 		t.Fatalf("error = %v; want transport", err)
+	}
+}
+
+func TestInterruptedStreamMustFinishBeforeNextTurn(t *testing.T) {
+	gate := make(chan struct{})
+	fd := fake.New()
+	agent := newAgentWithDriver(t, fd)
+	session, _ := agent.NewSession(context.Background())
+	fd.ScriptSession(session.key, fake.Script{Wait: gate})
+	first, err := session.Stream(context.Background(), "long")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := session.Interrupt(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := session.Stream(context.Background(), "too early"); !errors.Is(err, ErrInvalidState) {
+		t.Fatalf("new turn before interrupted stream terminal = %v", err)
+	}
+	if _, err := first.Result(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := session.Run(context.Background(), "now allowed"); err != nil {
+		t.Fatal(err)
+	}
+	close(gate)
+}
+
+func TestListSessionsAfterAgentCloseFails(t *testing.T) {
+	agent := newFakeAgent(t)
+	if err := agent.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := agent.ListSessions(context.Background()); !errors.Is(err, ErrInvalidState) {
+		t.Fatalf("ListSessions after Close error = %v", err)
+	}
+}
+
+func TestSessionRejectsRuntimeIDChange(t *testing.T) {
+	agent := newFakeAgent(t)
+	session, _ := agent.NewSession(context.Background())
+	if err := session.setID("original"); err != nil {
+		t.Fatal(err)
+	}
+	if err := session.setID("replacement"); err == nil {
+		t.Fatal("session accepted a different runtime ID")
+	}
+}
+
+func TestGetSessionUsesPersistedCwdForResume(t *testing.T) {
+	fd := fake.New()
+	fd.SetStoredSessions([]driver.StoredSessionMeta{{SessionID: "stored", Cwd: "/other/repo"}})
+	recording := &recordingSpecDriver{ProtocolDriver: fd}
+	prev := driverOverride
+	driverOverride = func(AgentKind) (driver.ProtocolDriver, bool) { return recording, true }
+	t.Cleanup(func() { driverOverride = prev })
+	agent, err := New(Claude, WithCwd("/default/repo"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer agent.Close()
+	session, err := agent.GetSession(context.Background(), "stored")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := session.Run(context.Background(), "continue"); err != nil {
+		t.Fatal(err)
+	}
+	recording.mu.Lock()
+	cwd := recording.spec.Cwd
+	recording.mu.Unlock()
+	if cwd != "/other/repo" {
+		t.Fatalf("resume cwd = %q; want persisted cwd", cwd)
 	}
 }

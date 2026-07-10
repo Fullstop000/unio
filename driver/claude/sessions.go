@@ -75,6 +75,7 @@ func readClaudeSession(path string) (driver.StoredSessionMeta, bool) {
 	meta := driver.StoredSessionMeta{
 		SessionID: strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)),
 		StartedAt: info.ModTime(),
+		UpdatedAt: info.ModTime(),
 	}
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 64*1024), 8*1024*1024)

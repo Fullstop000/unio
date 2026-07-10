@@ -32,6 +32,7 @@ type scriptedServer struct {
 	approvalDecision string
 	activeTurnID     string
 	killed           chan struct{}
+	waited           chan struct{}
 }
 
 func newScriptedServer() *scriptedServer {
@@ -42,6 +43,7 @@ func newScriptedServer() *scriptedServer {
 		fromDriver: inR, fromDriverW: inW,
 		threadID: "thr-test-1",
 		killed:   make(chan struct{}),
+		waited:   make(chan struct{}),
 	}
 	go s.loop()
 	return s
@@ -50,6 +52,11 @@ func newScriptedServer() *scriptedServer {
 func (s *scriptedServer) stdin() io.Writer       { return s.fromDriverW }
 func (s *scriptedServer) stdout() *bufio.Scanner { return bufio.NewScanner(s.toDriver) }
 func (s *scriptedServer) errText() string        { return "" }
+func (s *scriptedServer) wait() error {
+	<-s.killed
+	close(s.waited)
+	return nil
+}
 func (s *scriptedServer) kill() {
 	select {
 	case <-s.killed:
@@ -213,7 +220,14 @@ func TestCodexDriverFullTurn(t *testing.T) {
 	}
 
 	// Verify the outgoing wire had no jsonrpc header on turn/start.
-	_ = att.Session.Close(context.Background())
+	if err := att.Session.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-srv.waited:
+	case <-time.After(time.Second):
+		t.Fatal("Close returned before the app-server child was reaped")
+	}
 }
 
 func TestCodexRoutesSoleInFlightTurnWithoutThreadID(t *testing.T) {
@@ -397,6 +411,73 @@ func TestCodexApprovalBlocksAndContinues(t *testing.T) {
 	if decision != "accept" {
 		t.Fatalf("approval decision = %q; want accept", decision)
 	}
+}
+
+func TestCodexProcessLifetimeDoesNotUseTurnContext(t *testing.T) {
+	srv := newScriptedServer()
+	var factoryCtx context.Context
+	d := newWithTransport(func(ctx context.Context, _ string, _ driver.AgentSpec) (stdioTransport, error) {
+		factoryCtx = ctx
+		return srv, nil
+	})
+	att, err := d.OpenSession(context.Background(), "lifetime", driver.AgentSpec{ExecutablePath: fakeCodex(t)}, driver.OpenParams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	if err := att.Session.Run(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	if err := factoryCtx.Err(); err != nil {
+		t.Fatalf("process context was cancelled with turn context: %v", err)
+	}
+	_ = att.Session.Close(context.Background())
+}
+
+func TestWaitRespPreservesContextCause(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := waitResp(ctx, make(chan AppServerEvent), make(chan struct{}))
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancel error = %v", err)
+	}
+
+	ctx, cancel = context.WithTimeout(context.Background(), time.Nanosecond)
+	defer cancel()
+	<-ctx.Done()
+	_, err = waitResp(ctx, make(chan AppServerEvent), make(chan struct{}))
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("deadline error = %v", err)
+	}
+	if !errors.Is(toAgentErr(context.Canceled), context.Canceled) {
+		t.Fatal("toAgentErr lost context.Canceled")
+	}
+	if !errors.Is(toAgentErr(context.DeadlineExceeded), context.DeadlineExceeded) {
+		t.Fatal("toAgentErr lost context.DeadlineExceeded")
+	}
+}
+
+func TestCodexMissingResumeDoesNotStartFresh(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	srv := newScriptedServer()
+	d := newWithTransport(func(context.Context, string, driver.AgentSpec) (stdioTransport, error) { return srv, nil })
+	att, err := d.OpenSession(context.Background(), "resume", driver.AgentSpec{ExecutablePath: fakeCodex(t)}, driver.OpenParams{ResumeSessionID: "missing"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = att.Session.Run(context.Background(), nil)
+	if kind, ok := driverErrorKind(err); !ok || kind != driver.ErrSessionNotFound {
+		t.Fatalf("resume error = %v", err)
+	}
+}
+
+func driverErrorKind(err error) (driver.ErrorKind, bool) {
+	var agentErr *driver.AgentError
+	if !errors.As(err, &agentErr) || agentErr == nil {
+		return "", false
+	}
+	return agentErr.Kind, true
 }
 
 // fakeCodex creates a dummy `codex` on PATH so OpenSession's ResolveExecutable

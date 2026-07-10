@@ -56,7 +56,7 @@ func (a *Agent) NewSession(ctx context.Context) (*Session, error) {
 	if a.closed {
 		return nil, errs.InvalidState("agent is closed")
 	}
-	s := newSession(a, "")
+	s := newSession(a, "", "")
 	a.pending[s] = struct{}{}
 	return s, nil
 }
@@ -64,6 +64,12 @@ func (a *Agent) NewSession(ctx context.Context) (*Session, error) {
 // ListSessions lists conversations known to the runtime. Maintained live
 // handles are included even when runtime history has not reached disk yet.
 func (a *Agent) ListSessions(ctx context.Context) ([]SessionInfo, error) {
+	a.mu.Lock()
+	if a.closed {
+		a.mu.Unlock()
+		return nil, errs.InvalidState("agent is closed")
+	}
+	a.mu.Unlock()
 	stored, err := a.driver.ListSessions(ctx)
 	if err != nil {
 		return nil, err
@@ -105,17 +111,17 @@ func (a *Agent) GetSession(ctx context.Context, id string) (*Session, error) {
 	if err != nil {
 		return nil, err
 	}
-	found := false
+	var matched driver.StoredSessionMeta
 	for _, meta := range stored {
 		if meta.SessionID == id {
-			found = true
+			matched = meta
 			break
 		}
 	}
-	if !found {
+	if matched.SessionID == "" {
 		return nil, errs.SessionNotFound(id)
 	}
-	candidate := newSession(a, id)
+	candidate := newSession(a, id, matched.Cwd)
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.closed {
@@ -131,7 +137,7 @@ func (a *Agent) GetSession(ctx context.Context, id string) (*Session, error) {
 func sessionInfo(meta driver.StoredSessionMeta) SessionInfo {
 	return SessionInfo{
 		ID: meta.SessionID, Title: meta.Title, Cwd: meta.Cwd,
-		StartedAt: meta.StartedAt, MessageCount: meta.MessageCount,
+		StartedAt: meta.StartedAt, UpdatedAt: meta.UpdatedAt, MessageCount: meta.MessageCount,
 	}
 }
 

@@ -19,6 +19,9 @@ func (p *process) readerLoop() {
 	for sc.Scan() {
 		p.dispatch(sc.Text())
 	}
+	// Reap the shared app-server before p.closed is closed. The last session's
+	// Close waits on p.closed, so it cannot leave a zombie child behind.
+	_ = tr.wait()
 
 	// stdout closed: fail any session with a turn in flight.
 	p.mu.Lock()

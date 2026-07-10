@@ -73,7 +73,7 @@ func readCodexSession(path string) (driver.StoredSessionMeta, bool) {
 	if err != nil {
 		return driver.StoredSessionMeta{}, false
 	}
-	meta := driver.StoredSessionMeta{StartedAt: info.ModTime()}
+	meta := driver.StoredSessionMeta{StartedAt: info.ModTime(), UpdatedAt: info.ModTime()}
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 64*1024), 8*1024*1024)
 	for scanner.Scan() {

@@ -3,12 +3,14 @@ package codex
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
 
 	"github.com/Fullstop000/unio/driver"
+	errcontract "github.com/Fullstop000/unio/errs"
 )
 
 // version reported to the app-server in initialize.
@@ -181,14 +183,26 @@ func (s *session) Run(ctx context.Context, initPrompt *driver.PromptReq) error {
 // startOrResumeThread sends thread/resume (with liveness guard) or thread/start
 // and waits for the ThreadResponse carrying the thread id.
 func (s *session) startOrResumeThread(ctx context.Context) (string, error) {
-	if s.resume != "" && codexThreadAlive(s.resume) {
+	if s.resume != "" {
+		if !codexThreadAlive(s.resume) {
+			return "", driver.NewSessionNotFoundError(s.resume)
+		}
 		id := s.proc.allocID()
 		ch := s.proc.registerAndSend(id, "thread/resume", BuildThreadResume(id, s.resume, s.spec.SystemPrompt))
 		ev, err := waitResp(ctx, ch, s.proc.closed)
-		if err == nil && ev.Type == EvThreadResponse && ev.ThreadID != "" {
-			return ev.ThreadID, nil
+		if err != nil {
+			return "", err
 		}
-		// Fall through to a fresh start if resume failed/misfired.
+		if ev.Type == EvError {
+			return "", driver.NewRuntimeReportedError(ev.ErrMsg)
+		}
+		if ev.Type != EvThreadResponse || ev.ThreadID == "" {
+			return "", driver.NewProtocolError("codex: thread/resume returned no thread id")
+		}
+		if ev.ThreadID != s.resume {
+			return "", driver.NewProtocolError("codex: thread/resume changed the session id")
+		}
+		return ev.ThreadID, nil
 	}
 	id := s.proc.allocID()
 	ch := s.proc.registerAndSend(id, "thread/start", BuildThreadStart(id, s.spec.Model, s.spec.Cwd, s.spec.SystemPrompt))
@@ -349,11 +363,19 @@ func (s *session) Close(ctx context.Context) error {
 	s.closed = true
 	s.mu.Unlock()
 
+	last := false
 	if tid := s.SessionID(); tid != "" {
-		s.proc.unregisterSession(tid)
+		last = s.proc.unregisterSession(tid)
 	}
 	s.setState(driver.ProcessState{Phase: driver.PhaseClosed, SessionID: s.SessionID()})
 	s.bus.Close()
+	if last {
+		select {
+		case <-s.proc.closed:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 	return nil
 }
 
@@ -399,6 +421,12 @@ func toAgentErr(err error) *driver.AgentError {
 	if ae, ok := err.(*driver.AgentError); ok {
 		return ae
 	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return errcontract.Wrap(errcontract.KindTimeout, "codex: request deadline exceeded", err)
+	}
+	if errors.Is(err, context.Canceled) {
+		return errcontract.Wrap(errcontract.KindTransport, "codex: request canceled", err)
+	}
 	return driver.NewTransportError(err.Error())
 }
 
@@ -408,7 +436,7 @@ func waitResp(ctx context.Context, ch chan AppServerEvent, closed chan struct{})
 	case ev := <-ch:
 		return ev, nil
 	case <-ctx.Done():
-		return AppServerEvent{}, driver.NewTimeoutError("codex: request timed out")
+		return AppServerEvent{}, ctx.Err()
 	case <-closed:
 		return AppServerEvent{}, driver.NewTransportError("codex app-server closed")
 	}

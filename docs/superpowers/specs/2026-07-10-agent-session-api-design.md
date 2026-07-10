@@ -163,7 +163,8 @@ Normal transitions are:
 Idle ──Run/Stream──> Running ──complete──> Idle
                            └──blocked────> Blocked
 Blocked ──Continue──> Running
-Running/Blocked ──Interrupt──> Idle
+Running ──Interrupt──> terminal consumed ──> Idle
+Blocked ──Interrupt──> Idle
 ```
 
 `State` is safe for concurrent reads. A second `Run`, `Stream`, or `Continue`
@@ -241,7 +242,8 @@ context cancellation or request cleanup.
 
 Semantics are:
 
-- from `Running`, interrupt the active turn and move to `Idle`;
+- from `Running`, interrupt the active turn; move to `Idle` when its terminal
+  event is consumed;
 - from `Blocked`, abandon the suspended turn and move to `Idle`;
 - from `Idle`, do nothing and return nil;
 - interruption is normal control flow, not an error;
@@ -249,6 +251,10 @@ Semantics are:
 
 Any waiting `Run`, `Stream`, or `Continue` returns the partial result with
 `Interrupted` set after the runtime confirms interruption.
+
+A caller using `Stream` must drain `Result` before starting another turn. Until
+the interrupted Stream consumes its terminal event, the Session remains
+`Running` so two streams can never compete for the shared event source.
 
 Context cancellation on `Run`, `Stream`, or `Continue` requests an interrupt.
 The session must not report `Idle` while the underlying turn is still running.

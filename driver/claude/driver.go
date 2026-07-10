@@ -55,6 +55,9 @@ func (d *Driver) OpenSession(ctx context.Context, key driver.SessionKey, spec dr
 	if aerr != nil {
 		return nil, aerr
 	}
+	if params.ResumeSessionID != "" && !claudeSessionAlive(spec.Cwd, params.ResumeSessionID) {
+		return nil, driver.NewSessionNotFoundError(params.ResumeSessionID)
+	}
 
 	bus := driver.NewEventBus()
 	h := &handle{
@@ -130,9 +133,8 @@ func (h *handle) setSessionID(sid string) {
 	h.sessionID.Store(&sid)
 }
 
-// buildArgs assembles the claude headless argv. --resume is added only when the
-// on-disk transcript for the prior session exists (liveness guard), else we
-// start fresh.
+// buildArgs assembles the claude headless argv. OpenSession validates explicit
+// resume IDs; once accepted they are never silently downgraded to a fresh turn.
 func (h *handle) buildArgs() []string {
 	args := []string{
 		"-p",
@@ -147,7 +149,7 @@ func (h *handle) buildArgs() []string {
 	if h.spec.SystemPrompt != "" {
 		args = append(args, "--append-system-prompt", h.spec.SystemPrompt)
 	}
-	if h.resume != "" && claudeSessionAlive(h.spec.Cwd, h.resume) {
+	if h.resume != "" {
 		args = append(args, "--resume", h.resume)
 	}
 	args = append(args, h.spec.ExtraArgs...)
@@ -162,9 +164,13 @@ func (h *handle) Run(ctx context.Context, initPrompt *driver.PromptReq) error {
 		h.lmu.Unlock()
 		return driver.NewUnsupportedError("claude: session is closed")
 	}
+	if err := ctx.Err(); err != nil {
+		h.lmu.Unlock()
+		return err
+	}
 	h.setState(driver.ProcessState{Phase: driver.PhaseStarting})
 
-	tr, err := h.factory(ctx, h.execPath, h.buildArgs(), h.spec)
+	tr, err := h.factory(context.WithoutCancel(ctx), h.execPath, h.buildArgs(), h.spec)
 	if err != nil {
 		st := driver.ProcessState{Phase: driver.PhaseFailed}
 		if ae, ok := err.(*driver.AgentError); ok {
@@ -311,6 +317,9 @@ func (h *handle) readerLoop() {
 	for sc.Scan() {
 		h.handleLine(sc.Text())
 	}
+	// Reap the child before publishing terminal state. Close and Interrupt wait
+	// on done, so their return guarantees no zombie process remains.
+	_ = tr.wait()
 
 	// stdout closed: if a turn was in flight, report transport-closed.
 	if p := h.curRun.Load(); p != nil && *p != "" {

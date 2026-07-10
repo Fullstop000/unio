@@ -219,6 +219,7 @@ type StoredSessionMeta struct {
 	SessionID    SessionID
 	Title        string
 	StartedAt    time.Time
+	UpdatedAt    time.Time
 	MessageCount int
 	Cwd          string
 }

@@ -20,6 +20,7 @@ import (
 type stdioTransport interface {
 	stdin() io.Writer
 	stdout() *bufio.Scanner
+	wait() error
 	kill()
 	errText() string
 }
@@ -37,6 +38,7 @@ type procTransport struct {
 
 func (p *procTransport) stdin() io.Writer       { return p.in }
 func (p *procTransport) stdout() *bufio.Scanner { return p.sc }
+func (p *procTransport) wait() error            { return p.cmd.Wait() }
 func (p *procTransport) kill() {
 	if p.cmd.Process != nil {
 		_ = p.cmd.Process.Kill()
@@ -142,7 +144,7 @@ func newProcess(execPath string, spec driver.AgentSpec, factory transportFactory
 // once. Concurrent callers block until the first finishes.
 func (p *process) ensureStarted(ctx context.Context) error {
 	p.startOnce.Do(func() {
-		tr, err := p.factory(ctx, p.execPath, p.spec)
+		tr, err := p.factory(context.WithoutCancel(ctx), p.execPath, p.spec)
 		if err != nil {
 			p.startErr = err
 			p.dead.Store(true)
@@ -160,11 +162,13 @@ func (p *process) ensureStarted(ctx context.Context) error {
 		case ev := <-respCh:
 			if ev.Type == EvError {
 				p.startErr = driver.NewProtocolError("codex initialize failed: " + ev.ErrMsg)
+				tr.kill()
 				p.dead.Store(true)
 				return
 			}
 		case <-ctx.Done():
-			p.startErr = driver.NewTimeoutError("codex initialize timed out")
+			p.startErr = ctx.Err()
+			tr.kill()
 			p.dead.Store(true)
 			return
 		case <-p.closed:
@@ -215,7 +219,7 @@ func (p *process) registerSession(threadID string, s *session) {
 	p.mu.Unlock()
 }
 
-func (p *process) unregisterSession(threadID string) {
+func (p *process) unregisterSession(threadID string) bool {
 	p.mu.Lock()
 	delete(p.sessions, threadID)
 	empty := len(p.sessions) == 0
@@ -223,6 +227,7 @@ func (p *process) unregisterSession(threadID string) {
 	if empty {
 		p.shutdown()
 	}
+	return empty
 }
 
 func (p *process) sessionForThread(threadID string) *session {

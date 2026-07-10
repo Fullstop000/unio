@@ -101,13 +101,15 @@ Only one turn may run per Session. A concurrent `Run`, `Stream`, or invalid
 
 `Interrupt` matches the user-visible coding-agent action:
 
-- running -> interrupt -> idle;
+- running -> interrupt -> terminal event consumed -> idle;
 - blocked -> interrupt -> idle;
 - idle -> interrupt is an idempotent no-op.
 
 Confirmed interruption is normal control flow and sets `Result.Interrupted`.
 Failure to deliver or confirm interruption is an error. Context cancellation
 requests interruption and must not expose idle before runtime confirmation.
+For a manual Stream, the Session remains running until that Stream consumes its
+terminal event; a new turn is rejected before then.
 
 ### Block and continue
 
