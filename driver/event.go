@@ -16,6 +16,8 @@ const (
 	EventCompleted EventType = "completed"
 	// EventFailed: a run failed; Err carries the reason.
 	EventFailed EventType = "failed"
+	// EventBlocked pauses a run until the host supplies external input.
+	EventBlocked EventType = "blocked"
 )
 
 // ItemKind tags the content of an EventOutput item.
@@ -72,6 +74,8 @@ type AgentEvent struct {
 	Result RunResult
 	// Err is set for EventFailed.
 	Err *AgentError
+	// Blocked is set for EventBlocked.
+	Blocked *BlockedReason
 }
 
 // --- constructor helpers (used by drivers to keep call sites terse) ---
@@ -99,6 +103,11 @@ func CompletedEvent(key SessionKey, sid SessionID, run RunID, result RunResult) 
 // FailedEvent builds an EventFailed.
 func FailedEvent(key SessionKey, sid SessionID, run RunID, err *AgentError) AgentEvent {
 	return AgentEvent{Type: EventFailed, Key: key, SessionID: sid, RunID: run, Err: err}
+}
+
+// BlockedEvent builds an EventBlocked.
+func BlockedEvent(key SessionKey, sid SessionID, run RunID, reason BlockedReason) AgentEvent {
+	return AgentEvent{Type: EventBlocked, Key: key, SessionID: sid, RunID: run, Blocked: &reason}
 }
 
 // TypeName returns a short human-readable name for logging.

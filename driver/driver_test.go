@@ -196,3 +196,15 @@ func TestTokenUsageAdd(t *testing.T) {
 		t.Fatalf("unexpected cost accumulation: %v", u.CostUSD)
 	}
 }
+
+func TestBlockedEventCarriesReason(t *testing.T) {
+	reason := BlockedReason{
+		Kind:    BlockedToolApproval,
+		Message: "Allow go test?",
+		Options: []BlockOption{{Value: "allow_once", Label: "Allow once"}},
+	}
+	ev := BlockedEvent("key", "sid", "run", reason)
+	if ev.Type != EventBlocked || ev.Blocked == nil || ev.Blocked.Kind != BlockedToolApproval {
+		t.Fatalf("unexpected blocked event: %+v", ev)
+	}
+}

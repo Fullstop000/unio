@@ -38,13 +38,18 @@ const (
 	// host. Surfaced at OpenSession time so a host can tell the user which
 	// executable to install rather than failing obscurely at spawn.
 	KindNotInstalled ErrorKind = "not_installed"
+	// KindInvalidState means the requested action is not valid in the current
+	// human-observable session state.
+	KindInvalidState ErrorKind = "invalid_state"
+	// KindSessionNotFound means a runtime-owned session id does not exist.
+	KindSessionNotFound ErrorKind = "session_not_found"
 )
 
 // Valid reports whether k is a recognised category. Useful when decoding an
 // error kind received over a wire boundary from another-language peer.
 func (k ErrorKind) Valid() bool {
 	switch k {
-	case KindTransport, KindProtocol, KindTimeout, KindRuntimeReported, KindUnsupported, KindNotInstalled:
+	case KindTransport, KindProtocol, KindTimeout, KindRuntimeReported, KindUnsupported, KindNotInstalled, KindInvalidState, KindSessionNotFound:
 		return true
 	default:
 		return false
@@ -133,6 +138,15 @@ func NotInstalled(msg string) *AgentError { return New(KindNotInstalled, msg) }
 // NotInstalledCmd builds a not-installed error naming the missing executable.
 func NotInstalledCmd(command string) *AgentError {
 	return New(KindNotInstalled, "executable not found on PATH: "+command)
+}
+
+// InvalidState builds an error for an action that does not apply to the
+// session's current state.
+func InvalidState(msg string) *AgentError { return New(KindInvalidState, msg) }
+
+// SessionNotFound builds an error naming a missing runtime session id.
+func SessionNotFound(id string) *AgentError {
+	return New(KindSessionNotFound, "session not found: "+id)
 }
 
 // KindOf extracts the ErrorKind from any error that is (or wraps) an

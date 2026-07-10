@@ -143,20 +143,30 @@ func TestFakeFailScript(t *testing.T) {
 	}
 }
 
-func TestFakeCancelNotInFlight(t *testing.T) {
+func TestFakeInterruptNotInFlight(t *testing.T) {
 	d := New()
 	key := driver.SessionKey("w-s4")
 	att, _ := d.OpenSession(context.Background(), key, driver.AgentSpec{}, driver.OpenParams{})
 	_ = att.Events.Subscribe()
 	_ = att.Session.Run(context.Background(), nil)
 
-	// No run in flight → NotInFlight.
-	out, err := att.Session.Cancel(context.Background(), "nope")
+	if err := att.Session.Interrupt(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestFakeInterruptIdleIsNoop(t *testing.T) {
+	d := New()
+	att, err := d.OpenSession(context.Background(), "interrupt", driver.AgentSpec{}, driver.OpenParams{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out != driver.CancelNotInFlight {
-		t.Fatalf("expected NotInFlight, got %s", out)
+	_ = att.Events.Subscribe()
+	if err := att.Session.Run(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := att.Session.Interrupt(context.Background()); err != nil {
+		t.Fatalf("idle interrupt: %v", err)
 	}
 }
 

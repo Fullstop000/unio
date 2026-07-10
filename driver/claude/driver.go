@@ -230,17 +230,24 @@ func (h *handle) Prompt(ctx context.Context, req driver.PromptReq) (driver.RunID
 	return runID, nil
 }
 
-// Cancel is a no-op for headless Claude: there is no in-band interrupt, and
+// Interrupt is unsupported for headless Claude until process-kill interruption
+// is implemented.
 // killing the child would end the whole session. Report NotInFlight when idle,
 // Aborted is not truly achievable, so we return NotInFlight to be honest.
-func (h *handle) Cancel(ctx context.Context, run driver.RunID) (driver.CancelOutcome, error) {
+func (h *handle) Interrupt(ctx context.Context) error {
 	if p := h.curRun.Load(); p != nil && *p != "" {
 		// A turn is in flight but headless Claude cannot interrupt it without
 		// tearing down the session. We surface Aborted semantics only by
 		// closing the session via Close; here we report the honest state.
-		return driver.CancelNotInFlight, driver.NewUnsupportedError("claude headless has no mid-turn interrupt; use Close")
+		return driver.NewUnsupportedError("claude headless has no mid-turn interrupt")
 	}
-	return driver.CancelNotInFlight, nil
+	return nil
+}
+
+// Continue returns unsupported because this transport cannot currently emit a
+// blocked permission/user-input event.
+func (h *handle) Continue(ctx context.Context, input string) (driver.RunID, error) {
+	return "", driver.NewUnsupportedError("claude: no blocked turn")
 }
 
 // Close terminates the child and closes the event bus. Idempotent; after Close,

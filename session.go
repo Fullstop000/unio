@@ -110,11 +110,9 @@ func (s *Session) clearBusy() {
 	s.mu.Unlock()
 }
 
-// Cancel interrupts the in-flight turn (graceful where the agent supports it,
-// e.g. Codex). Returns whether a run was actually aborted.
-func (s *Session) Cancel(ctx context.Context) (bool, error) {
-	out, err := s.inner.Cancel(ctx, "")
-	return out == driver.CancelAborted, err
+// Interrupt interrupts the in-flight turn.
+func (s *Session) Interrupt(ctx context.Context) error {
+	return s.inner.Interrupt(ctx)
 }
 
 // Close shuts the session down and releases the agent process/resources.

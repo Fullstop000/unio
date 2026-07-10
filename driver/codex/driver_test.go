@@ -243,16 +243,15 @@ func TestCodexDriverInterrupt(t *testing.T) {
 	ch := att.Events.Subscribe()
 	_ = att.Session.Run(context.Background(), nil)
 
-	// Idle cancel → NotInFlight.
-	if out, _ := att.Session.Cancel(context.Background(), "none"); out != driver.CancelNotInFlight {
-		t.Fatalf("idle cancel should be NotInFlight, got %s", out)
+	if err := att.Session.Interrupt(context.Background()); err != nil {
+		t.Fatalf("idle interrupt: %v", err)
 	}
 
 	// Start a turn, then interrupt it. Codex supports graceful mid-turn cancel.
 	runID, _ := att.Session.Prompt(context.Background(), driver.PromptReq{Text: "long task"})
 	// Cancel may race the fast scripted completion; both outcomes are valid so
 	// we assert the run terminates (interrupted → FinishCancelled, or completed).
-	_, _ = att.Session.Cancel(context.Background(), runID)
+	_ = att.Session.Interrupt(context.Background())
 
 	evs := drainUntil(t, ch, func(ev driver.AgentEvent) bool {
 		return (ev.Type == driver.EventCompleted || ev.Type == driver.EventFailed) && ev.RunID == runID
@@ -294,7 +293,7 @@ func TestCodexConcurrentUseIsSafe(t *testing.T) {
 			defer wg.Done()
 			for j := 0; j < 15; j++ {
 				_, _ = att.Session.Prompt(context.Background(), driver.PromptReq{Text: "x"})
-				_, _ = att.Session.Cancel(context.Background(), "r")
+				_ = att.Session.Interrupt(context.Background())
 				_ = att.Session.ProcessState()
 				_ = att.Session.SessionID()
 			}

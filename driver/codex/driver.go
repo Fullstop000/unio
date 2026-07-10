@@ -224,29 +224,34 @@ func (s *session) Prompt(ctx context.Context, req driver.PromptReq) (driver.RunI
 	return runID, nil
 }
 
-// Cancel sends turn/interrupt for the in-flight turn. Codex supports graceful
+// Interrupt sends turn/interrupt for the in-flight turn. Codex supports graceful
 // mid-turn interrupt (unlike Claude headless).
-func (s *session) Cancel(ctx context.Context, run driver.RunID) (driver.CancelOutcome, error) {
+func (s *session) Interrupt(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
-		return driver.CancelNotInFlight, nil
+		return nil
 	}
 	cur := s.curRun.Load()
 	if cur == nil || *cur == "" {
-		return driver.CancelNotInFlight, nil
+		return nil
 	}
 	tp := s.turnID.Load()
 	if tp == nil || *tp == "" {
-		return driver.CancelNotInFlight, nil
+		return nil
 	}
 	id := s.proc.allocID()
 	ch := s.proc.registerAndSend(id, "turn/interrupt", BuildTurnInterrupt(id, s.SessionID(), *tp))
 	if _, err := waitResp(ctx, ch, s.proc.closed); err != nil {
-		return driver.CancelNotInFlight, toAgentErr(err)
+		return toAgentErr(err)
 	}
 	// The turn/completed{interrupted} notification will finalise the run.
-	return driver.CancelAborted, nil
+	return nil
+}
+
+// Continue is implemented with approval routing in the blocked-turn task.
+func (s *session) Continue(ctx context.Context, input string) (driver.RunID, error) {
+	return "", driver.NewUnsupportedError("codex: no blocked turn")
 }
 
 // Close unregisters the session (tearing down the shared child only when this

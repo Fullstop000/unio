@@ -253,15 +253,19 @@ func (s *session) Prompt(ctx context.Context, req driver.PromptReq) (driver.RunI
 	return runID, nil
 }
 
-// Cancel reports NotInFlight unless a run is currently in flight, in which case
-// it flips back to Active and reports Aborted.
-func (s *session) Cancel(ctx context.Context, run driver.RunID) (driver.CancelOutcome, error) {
+// Continue is implemented once scripted blocking support is configured.
+func (s *session) Continue(ctx context.Context, input string) (driver.RunID, error) {
+	return "", driver.NewUnsupportedError("fake: no blocked turn")
+}
+
+// Interrupt is an idempotent no-op unless a run is currently in flight.
+func (s *session) Interrupt(ctx context.Context) error {
 	st := s.ProcessState()
 	if st.Phase != driver.PhasePromptInFlight {
-		return driver.CancelNotInFlight, nil
+		return nil
 	}
 	s.setState(driver.ProcessState{Phase: driver.PhaseActive, SessionID: st.SessionID})
-	return driver.CancelAborted, nil
+	return nil
 }
 
 // Close moves to PhaseClosed and closes the event bus. Idempotent.

@@ -69,3 +69,18 @@ func TestUnwrap(t *testing.T) {
 		t.Fatal("errors.Is should reach the wrapped cause via Unwrap")
 	}
 }
+
+func TestInvalidStateAndSessionNotFoundKinds(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		kind ErrorKind
+	}{
+		{InvalidState("busy"), KindInvalidState},
+		{SessionNotFound("s-1"), KindSessionNotFound},
+	} {
+		got, ok := KindOf(tc.err)
+		if !ok || got != tc.kind {
+			t.Fatalf("KindOf(%v) = %q, %v; want %q, true", tc.err, got, ok, tc.kind)
+		}
+	}
+}
