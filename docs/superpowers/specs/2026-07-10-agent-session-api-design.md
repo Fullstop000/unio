@@ -72,6 +72,9 @@ func (a *Agent) ListSessions(ctx context.Context) ([]SessionInfo, error)
 func (a *Agent) GetSession(ctx context.Context, id string) (*Session, error)
 func (a *Agent) Close() error
 
+// ID returns the runtime-owned session ID. A new session has no runtime ID
+// until its first Run or Stream starts; ID returns "" before then. A session
+// returned by GetSession has its known ID immediately.
 func (s *Session) ID() string
 func (s *Session) State() SessionState
 func (s *Session) Run(ctx context.Context, prompt string) (Result, error)
@@ -124,9 +127,14 @@ result, err := session.Run(ctx, "Continue the previous work")
 There is no public `Resume` method. Whether a runtime process is alive or needs
 to be recreated is not a user-facing behavior.
 
-`NewSession` establishes a new runtime conversation and returns a session with
-its runtime-owned ID available. The SDK does not synthesize a replacement for
-the runtime's canonical session ID.
+`NewSession` returns a new local session handle without sending a hidden prompt.
+Its runtime-owned ID is therefore unavailable until the first `Run` or `Stream`
+starts the runtime conversation. `ID` returns an empty string before that point
+and the runtime-owned ID afterward. This behavior must be stated in the public
+GoDoc. A session returned by `GetSession` already has its known ID.
+
+The SDK does not synthesize a replacement for the runtime's canonical session
+ID.
 
 ## Session state
 
@@ -304,6 +312,7 @@ or session object that internally contains an error.
 The implementation must prove the design with shared tests covering:
 
 - new session, run, and multi-turn reuse;
+- empty new-session ID before the first turn and runtime ID afterward;
 - list, get, and automatic resume;
 - `Idle -> Running -> Idle`;
 - `Running -> Blocked -> Continue -> Running`;
