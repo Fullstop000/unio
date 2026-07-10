@@ -2,13 +2,13 @@
 
 ## 支持概览
 
-| Agent | 运行/流式 | 历史会话/恢复 | 中断 | 阻塞/继续 | 工具结果流 | 用量 |
-| --- | :---: | :---: | :---: | :---: | :---: | --- |
-| Claude Code | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ 含缓存写入、成本、耗时 |
-| Codex | ✅ | ✅ | ✅ | ⚠️ 仅审批 | ⚠️ 仅命令输出 | ⚠️ 无缓存写入、成本、耗时 |
-| Kimi | ✅ | ⚠️ 恢复依赖 ACP capability | ✅ | ✅ | ✅ | ❌ |
-| TraeX | ✅ | ⚠️ 恢复依赖 ACP capability | ✅ | ✅ | ✅ | ❌ |
-| OpenCode | ✅ | ⚠️ 恢复依赖 ACP capability | ✅ | ✅ | ✅ | ❌ |
+| Agent | 运行/流式 | 会话列表 | 会话恢复 | 中断 | 阻塞/继续 | 工具结果流 | 用量 |
+| --- | :---: | :---: | :---: | :---: | :---: | :---: | --- |
+| Claude Code | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ 含缓存写入、成本、耗时 |
+| Codex | ✅ | ✅ | ✅ | ✅ | ⚠️ 仅审批 | ⚠️ 仅命令输出 | ⚠️ 无缓存写入、成本、耗时 |
+| Kimi | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ |
+| TraeX | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ |
+| OpenCode | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ |
 
 | 标记 | 含义 |
 | --- | --- |
@@ -32,10 +32,10 @@
 | API | Claude Code | Codex | Kimi | TraeX | OpenCode | 备注 |
 | --- | :---: | :---: | :---: | :---: | :---: | --- |
 | `(*Agent).NewSession(ctx)` | ✅ | ✅ | ✅ | ✅ | ✅ | |
-| `(*Agent).ListSessions(ctx, opts...)` | ✅ | ✅ | ✅ | ✅ | ✅ | ACP Agent 需要运行时声明 `session/list` capability |
+| `(*Agent).ListSessions(ctx, opts...)` | ✅ | ✅ | ✅ | ✅ | ✅ | |
 | `SessionsIn(dir)` | ✅ | ✅ | ✅ | ✅ | ✅ | 按工作目录筛选会话 |
 | `AllSessions()` | ✅ | ✅ | ✅ | ✅ | ✅ | 取消工作目录筛选 |
-| `(*Agent).GetSession(ctx, id)` | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ | ACP Agent 需要运行时声明 `resume` 或 `loadSession` capability |
+| `(*Agent).GetSession(ctx, id)` | ✅ | ✅ | ✅ | ✅ | ✅ | |
 | `(*Agent).Close()` | ✅ | ✅ | ✅ | ✅ | ✅ | |
 
 ## Session
