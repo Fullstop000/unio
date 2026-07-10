@@ -1,0 +1,25 @@
+driver/driver.go
+  s_0b0f8a8fcdf726::t_1620b07511abcc 67-68
+driver/fake/fake.go
+  s_0b0f8a8fcdf726::t_db526fe5d240fe 24-27,120-123,129-138,154-155,160-166,218,222-224,229-230,232,235,239-248,250-260,262-264,268-271,273-274,276-295,299-324,329-352,355-360
+driver/fake/fake_test.go
+  s_0b0f8a8fcdf726::t_2a7a711ae0b503 173-236
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "44a80dbf694ef1bb1cc2ece669c0a04322e9608f",
+  "prompts": {},
+  "sessions": {
+    "s_0b0f8a8fcdf726": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4a17-3b3b-76c1-90ac-be1a039189b7",
+        "model": "unknown"
+      },
+      "human_author": "Fullstop000 <fullstop1005@gmail.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
