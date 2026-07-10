@@ -1,0 +1,23 @@
+driver/codex/driver.go
+  s_0b0f8a8fcdf726::t_15dee560dbd427 19-21,26,30,60,74-82
+driver/codex/driver_test.go
+  s_0b0f8a8fcdf726::t_4617b7c1db8c1f 318-333
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "7f512d0fd11eb57f4f7e35e6705a5b9cb0278415",
+  "prompts": {},
+  "sessions": {
+    "s_0b0f8a8fcdf726": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4a17-3b3b-76c1-90ac-be1a039189b7",
+        "model": "unknown"
+      },
+      "human_author": "Fullstop000 <fullstop1005@gmail.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
