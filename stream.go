@@ -66,6 +66,11 @@ func (s *Stream) Next() bool {
 				s.result.DurationMs = ev.Result.DurationMs
 				s.result.Interrupted = ev.Result.FinishReason == driver.FinishCancelled
 				_ = s.owner.setID(ev.SessionID)
+				if ev.Result.FinishReason == driver.FinishTransportClosed {
+					s.owner.dropAttachment()
+					s.finish(s.result, driver.NewTransportError("agent transport closed during turn"), Idle)
+					return false
+				}
 				s.finish(s.result, s.cancelErr, Idle)
 				return false
 			case driver.EventBlocked:

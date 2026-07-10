@@ -105,6 +105,11 @@ func (s *Session) ensureAttached(ctx context.Context) error {
 		return err
 	}
 	s.mu.Lock()
+	if s.closedByAgent || s.agent.isClosed() {
+		s.mu.Unlock()
+		_ = att.Session.Close(context.Background())
+		return errs.InvalidState("agent is closed")
+	}
 	s.inner = att.Session
 	s.events = events
 	sid := att.Session.SessionID()
@@ -200,4 +205,15 @@ func (s *Session) closeAttachment(ctx context.Context) error {
 		return inner.Close(ctx)
 	}
 	return nil
+}
+
+func (s *Session) dropAttachment() {
+	s.mu.Lock()
+	inner := s.inner
+	s.inner = nil
+	s.events = nil
+	s.mu.Unlock()
+	if inner != nil {
+		_ = inner.Close(context.Background())
+	}
 }

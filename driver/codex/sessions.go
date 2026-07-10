@@ -113,6 +113,14 @@ func readCodexSession(path string) (driver.StoredSessionMeta, bool) {
 			if payload.Type == "user_message" && meta.Title == "" {
 				meta.Title = truncateRunes(payload.Message, 120)
 			}
+		case "response_item":
+			var payload struct {
+				Type string `json:"type"`
+				Role string `json:"role"`
+			}
+			if json.Unmarshal(record.Payload, &payload) == nil && payload.Type == "message" && (payload.Role == "user" || payload.Role == "assistant") {
+				meta.MessageCount++
+			}
 		}
 	}
 	return meta, meta.SessionID != ""

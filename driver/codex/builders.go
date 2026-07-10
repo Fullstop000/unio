@@ -46,9 +46,7 @@ func BuildInitialized() string {
 // personality, which is a 3-value enum).
 func BuildThreadStart(id uint64, model, cwd, developerInstructions string) string {
 	params := map[string]any{
-		"cwd":            cwd,
-		"approvalPolicy": "never",
-		"sandbox":        "danger-full-access",
+		"cwd": cwd,
 	}
 	if model != "" {
 		params["model"] = model

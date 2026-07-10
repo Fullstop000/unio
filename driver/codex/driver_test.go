@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"sync"
@@ -377,6 +378,11 @@ func TestCodexApprovalBlocksAndContinues(t *testing.T) {
 	}, 3*time.Second)
 	if blocked[len(blocked)-1].Blocked == nil || blocked[len(blocked)-1].Blocked.Kind != driver.BlockedToolApproval {
 		t.Fatalf("unexpected blocked event: %+v", blocked[len(blocked)-1])
+	}
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := att.Session.Continue(cancelled, "allow_once"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled Continue error = %v", err)
 	}
 	continuedRun, err := att.Session.Continue(context.Background(), "allow_once")
 	if err != nil {

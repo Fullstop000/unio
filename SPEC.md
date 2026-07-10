@@ -139,8 +139,9 @@ turn runs.
 ## 5. Back pressure
 
 The EventBus is bounded and drop-on-full so one slow subscriber cannot block a
-runtime reader. Implementations expose a dropped-event counter. Producers never
-send on a closed channel.
+runtime reader. A terminal `blocked`, `completed`, or `failed` event evicts one
+older buffered event rather than being dropped itself. Implementations expose a
+dropped-event counter. Producers never send on a closed channel.
 
 ## 6. Versioning
 

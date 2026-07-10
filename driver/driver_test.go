@@ -76,6 +76,40 @@ func TestEventBusSlowObserverDoesNotStallFast(t *testing.T) {
 	}
 }
 
+func TestEventBusPreservesTerminalEventForFullObserver(t *testing.T) {
+	bus := NewEventBus()
+	ch := bus.Subscribe()
+	for i := 0; i < observerCapacity+1; i++ {
+		bus.Emit(OutputEvent("key", "sid", "run", AgentEventItem{Kind: ItemText, Text: "x"}))
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for bus.Dropped() == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if bus.Dropped() == 0 {
+		t.Fatal("observer did not become full")
+	}
+	beforeTerminal := bus.Dropped()
+	bus.Emit(CompletedEvent("key", "sid", "run", RunResult{FinishReason: FinishNatural}))
+	deadline = time.Now().Add(2 * time.Second)
+	for bus.Dropped() == beforeTerminal && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+
+	timer := time.NewTimer(2 * time.Second)
+	defer timer.Stop()
+	for {
+		select {
+		case ev := <-ch:
+			if ev.Type == EventCompleted {
+				return
+			}
+		case <-timer.C:
+			t.Fatal("completed event was dropped for a full observer")
+		}
+	}
+}
+
 func TestEventBusCloseDrainsAndClosesObservers(t *testing.T) {
 	bus := NewEventBus()
 	ch := bus.Subscribe()

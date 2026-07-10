@@ -16,7 +16,7 @@ func TestListSessionsReadsCodexHistory(t *testing.T) {
 	content := "" +
 		`{"type":"session_meta","timestamp":"2026-07-10T02:00:00Z","payload":{"id":"thread-1","cwd":"/repo/api","timestamp":"2026-07-10T02:00:00Z"}}` + "\n" +
 		`{"type":"event_msg","timestamp":"2026-07-10T02:00:01Z","payload":{"type":"user_message","message":"Refactor auth"}}` + "\n" +
-		`{"type":"event_msg","timestamp":"2026-07-10T02:00:02Z","payload":{"type":"agent_message","message":"Inspecting"}}` + "\n"
+		`{"type":"response_item","timestamp":"2026-07-10T02:00:02Z","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Inspecting"}]}}` + "\n"
 	if err := os.WriteFile(filepath.Join(dir, "rollout-thread-1.jsonl"), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}

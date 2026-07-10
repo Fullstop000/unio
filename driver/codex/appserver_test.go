@@ -39,8 +39,11 @@ func TestBuildThreadStartShape(t *testing.T) {
 	var v map[string]json.RawMessage
 	_ = json.Unmarshal([]byte(BuildThreadStart(1, "gpt-5.5", "/tmp", "be helpful")), &v)
 	params, _ := asObject(v["params"])
-	if asString(params["approvalPolicy"]) != "never" {
-		t.Fatal("approvalPolicy should be never")
+	if _, ok := params["approvalPolicy"]; ok {
+		t.Fatal("thread/start must respect the user's configured approval policy")
+	}
+	if _, ok := params["sandbox"]; ok {
+		t.Fatal("thread/start must respect the user's configured sandbox")
 	}
 	if asString(params["cwd"]) != "/tmp" || asString(params["model"]) != "gpt-5.5" {
 		t.Fatal("cwd/model not set")

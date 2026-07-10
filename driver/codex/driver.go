@@ -283,6 +283,9 @@ func (s *session) Continue(ctx context.Context, input string) (driver.RunID, err
 	if s.closed {
 		return "", driver.NewUnsupportedError("codex: session is closed")
 	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	s.blockMu.Lock()
 	block := s.block
 	if block == nil {
@@ -300,9 +303,6 @@ func (s *session) Continue(ctx context.Context, input string) (driver.RunID, err
 	}
 	s.block = nil
 	s.blockMu.Unlock()
-	if err := ctx.Err(); err != nil {
-		return "", err
-	}
 	runID := driver.NewRunID()
 	s.curRun.Store(&runID)
 	s.setState(driver.ProcessState{Phase: driver.PhasePromptInFlight, SessionID: s.SessionID(), RunID: runID})

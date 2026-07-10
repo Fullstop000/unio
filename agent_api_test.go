@@ -214,3 +214,62 @@ func waitDriverPhase(t *testing.T, session *Session, want driver.Phase) {
 	}
 	t.Fatalf("driver did not reach phase %q", want)
 }
+
+type blockingOpenDriver struct {
+	driver.ProtocolDriver
+	started chan struct{}
+	release chan struct{}
+}
+
+func (d *blockingOpenDriver) OpenSession(ctx context.Context, key driver.SessionKey, spec driver.AgentSpec, params driver.OpenParams) (*driver.SessionAttachment, error) {
+	close(d.started)
+	select {
+	case <-d.release:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return d.ProtocolDriver.OpenSession(ctx, key, spec, params)
+}
+
+func TestAgentCloseCannotRaceInANewAttachment(t *testing.T) {
+	fd := fake.New()
+	blocking := &blockingOpenDriver{ProtocolDriver: fd, started: make(chan struct{}), release: make(chan struct{})}
+	prev := driverOverride
+	driverOverride = func(AgentKind) (driver.ProtocolDriver, bool) { return blocking, true }
+	t.Cleanup(func() { driverOverride = prev })
+	agent, err := New(Claude)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, _ := agent.NewSession(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := session.Run(context.Background(), "hello")
+		done <- err
+	}()
+	<-blocking.started
+	if err := agent.Close(); err != nil {
+		t.Fatal(err)
+	}
+	close(blocking.release)
+	if err := <-done; !errors.Is(err, ErrInvalidState) {
+		t.Fatalf("run error = %v; want invalid_state", err)
+	}
+	session.mu.Lock()
+	inner := session.inner
+	session.mu.Unlock()
+	if inner != nil {
+		t.Fatal("closed agent retained an attachment opened by a racing Run")
+	}
+}
+
+func TestTransportClosedTurnReturnsError(t *testing.T) {
+	fd := fake.New()
+	agent := newAgentWithDriver(t, fd)
+	session, _ := agent.NewSession(context.Background())
+	fd.ScriptSession(session.key, fake.Script{Result: driver.RunResult{FinishReason: driver.FinishTransportClosed}})
+	_, err := session.Run(context.Background(), "hello")
+	if kind, ok := errs.KindOf(err); !ok || kind != errs.KindTransport {
+		t.Fatalf("error = %v; want transport", err)
+	}
+}
