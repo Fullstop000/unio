@@ -1,0 +1,31 @@
+agent.go
+  s_0b0f8a8fcdf726::t_59847cedc02cd4 66-68,99-101
+facade.go
+  s_0b0f8a8fcdf726::t_4be02e0fd304f3 105-107,130-136
+README.md
+  s_0b0f8a8fcdf726::t_ba496acda4391f 97-100
+agent_api_test.go
+  s_0b0f8a8fcdf726::t_c97a801cf2ba80 183-202
+CHANGELOG.md
+  s_0b0f8a8fcdf726::t_f6fe118bb9e03b 5-6
+SPEC.md
+  s_0b0f8a8fcdf726::t_6a9261798e55e1 84-87
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "942dea05c6eded0adf230ef8f79a7347b4c8a50f",
+  "prompts": {},
+  "sessions": {
+    "s_0b0f8a8fcdf726": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4a17-3b3b-76c1-90ac-be1a039189b7",
+        "model": "unknown"
+      },
+      "human_author": "Fullstop000 <fullstop1005@gmail.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
