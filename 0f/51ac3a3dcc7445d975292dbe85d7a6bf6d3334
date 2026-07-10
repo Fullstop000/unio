@@ -1,0 +1,27 @@
+driver/driver_test.go
+  s_0b0f8a8fcdf726::t_fece7672d8c34b 199-210
+driver/event.go
+  s_0b0f8a8fcdf726::t_0ea7f58c272fd7 19-20,77-78,108-112
+errs/errs.go
+  s_0b0f8a8fcdf726::t_f827cb1e11ecf7 41-45,52,143-151
+errs/errs_test.go
+  s_0b0f8a8fcdf726::t_a00c21ecab9c4e 72-86
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "0f51ac3a3dcc7445d975292dbe85d7a6bf6d3334",
+  "prompts": {},
+  "sessions": {
+    "s_0b0f8a8fcdf726": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4a17-3b3b-76c1-90ac-be1a039189b7",
+        "model": "unknown"
+      },
+      "human_author": "Fullstop000 <fullstop1005@gmail.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
