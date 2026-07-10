@@ -102,8 +102,9 @@ type SessionInfo struct {
 type ListSessionsOption func(*listSessionsConfig)
 
 type listSessionsConfig struct {
-	cwd string
-	all bool
+	cwd   string
+	all   bool
+	limit int
 }
 
 // SessionsIn lists conversations belonging to dir instead of the Agent's
@@ -123,6 +124,13 @@ func AllSessions() ListSessionsOption {
 	return func(c *listSessionsConfig) {
 		c.cwd = ""
 		c.all = true
+	}
+}
+
+// MaxSessions returns at most n conversations. A non-positive n means no limit.
+func MaxSessions(n int) ListSessionsOption {
+	return func(c *listSessionsConfig) {
+		c.limit = n
 	}
 }
 
