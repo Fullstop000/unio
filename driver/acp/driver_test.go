@@ -23,6 +23,10 @@ func TestTraeXExecutableAliases(t *testing.T) {
 	}
 }
 
+func testAgentSpec() driver.AgentSpec {
+	return driver.AgentSpec{Cwd: "/repo", ExecutablePath: "/bin/sh"}
+}
+
 func TestDriverBasicsAndRuntimeConfiguration(t *testing.T) {
 	d := New(Runtime("definitely-not-installed-unio-test"))
 	if d.Transport() != driver.TransportACPNative {
@@ -101,7 +105,7 @@ func TestInitializationRejectsUnsupportedProtocolVersion(t *testing.T) {
 			send(response(msg["id"], map[string]any{"protocolVersion": 2, "agentCapabilities": map[string]any{}}))
 		}
 	}))
-	att, err := d.OpenSession(context.Background(), "key", driver.AgentSpec{Cwd: "/repo"}, driver.OpenParams{})
+	att, err := d.OpenSession(context.Background(), "key", testAgentSpec(), driver.OpenParams{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +120,7 @@ func TestResumeRequiresRuntimeCapability(t *testing.T) {
 			send(response(msg["id"], map[string]any{"protocolVersion": 1, "agentCapabilities": map[string]any{}}))
 		}
 	}))
-	att, err := d.OpenSession(context.Background(), "key", driver.AgentSpec{Cwd: "/repo"}, driver.OpenParams{ResumeSessionID: "old"})
+	att, err := d.OpenSession(context.Background(), "key", testAgentSpec(), driver.OpenParams{ResumeSessionID: "old"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +181,7 @@ func TestListSessionsFiltersAndExhaustsCursor(t *testing.T) {
 
 	got, err := d.ListSessions(context.Background(), driver.ListSessionsParams{
 		Cwd:  "/repo",
-		Spec: driver.AgentSpec{Cwd: "/repo"},
+		Spec: testAgentSpec(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -199,7 +203,7 @@ func TestListSessionsRequiresAdvertisedCapability(t *testing.T) {
 			send(response(msg["id"], map[string]any{"protocolVersion": 1, "agentCapabilities": map[string]any{}}))
 		}
 	}))
-	_, err := d.ListSessions(context.Background(), driver.ListSessionsParams{Cwd: "/repo", Spec: driver.AgentSpec{Cwd: "/repo"}})
+	_, err := d.ListSessions(context.Background(), driver.ListSessionsParams{Cwd: "/repo", Spec: testAgentSpec()})
 	if !errors.Is(err, driver.NewUnsupportedError("")) {
 		t.Fatalf("ListSessions error = %v", err)
 	}
@@ -241,7 +245,7 @@ func TestPermissionBecomesBlockedAndContinueResumesTurn(t *testing.T) {
 		}
 	}))
 
-	att, err := d.OpenSession(context.Background(), "key", driver.AgentSpec{Cwd: "/repo"}, driver.OpenParams{})
+	att, err := d.OpenSession(context.Background(), "key", testAgentSpec(), driver.OpenParams{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -288,7 +292,7 @@ func TestInterruptWaitsForCancelledPromptResponse(t *testing.T) {
 		}
 	}))
 
-	att, err := d.OpenSession(context.Background(), "key", driver.AgentSpec{Cwd: "/repo"}, driver.OpenParams{})
+	att, err := d.OpenSession(context.Background(), "key", testAgentSpec(), driver.OpenParams{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -334,7 +338,7 @@ func TestResumeUsesCapabilityAndKeepsRequestedID(t *testing.T) {
 			send(response(msg["id"], nil))
 		}
 	}))
-	att, err := d.OpenSession(context.Background(), "key", driver.AgentSpec{Cwd: "/repo"}, driver.OpenParams{ResumeSessionID: "existing"})
+	att, err := d.OpenSession(context.Background(), "key", testAgentSpec(), driver.OpenParams{ResumeSessionID: "existing"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -362,7 +366,7 @@ func TestResumeFallsBackToSessionLoad(t *testing.T) {
 			send(response(msg["id"], nil))
 		}
 	}))
-	att, err := d.OpenSession(context.Background(), "key", driver.AgentSpec{Cwd: "/repo"}, driver.OpenParams{ResumeSessionID: "existing"})
+	att, err := d.OpenSession(context.Background(), "key", testAgentSpec(), driver.OpenParams{ResumeSessionID: "existing"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -401,7 +405,7 @@ func TestToolCallUpdateIsCoalescedBeforeEmission(t *testing.T) {
 			send(response(msg["id"], map[string]any{"stopReason": "end_turn"}))
 		}
 	}))
-	att, err := d.OpenSession(context.Background(), "key", driver.AgentSpec{Cwd: "/repo"}, driver.OpenParams{})
+	att, err := d.OpenSession(context.Background(), "key", testAgentSpec(), driver.OpenParams{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -451,7 +455,7 @@ func TestCloseWithCancelledContextStillReleasesSession(t *testing.T) {
 			send(response(msg["id"], map[string]any{"sessionId": "s1"}))
 		}
 	}))
-	att, err := d.OpenSession(context.Background(), "key", driver.AgentSpec{Cwd: "/repo"}, driver.OpenParams{})
+	att, err := d.OpenSession(context.Background(), "key", testAgentSpec(), driver.OpenParams{})
 	if err != nil {
 		t.Fatal(err)
 	}
