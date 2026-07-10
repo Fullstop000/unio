@@ -4,7 +4,7 @@ unio is a multi-language SDK family. Every implementation must expose the same
 human-aligned behavior even though Claude Code and Codex use different runtime
 protocols.
 
-**Spec version: 0.3.0**
+**Spec version: 0.4.0**
 
 ## 1. Public object model
 

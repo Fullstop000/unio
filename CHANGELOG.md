@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Add `MaxSessions` to cap results returned by `Agent.ListSessions`.
+- You can now use `MaxSessions` to cap results returned by `Agent.ListSessions`.
 
 - Replaced package-level `Run`/`Start` with long-lived `Agent` instances.
 - Added `NewSession`, `ListSessions`, and `GetSession` with automatic resume.
