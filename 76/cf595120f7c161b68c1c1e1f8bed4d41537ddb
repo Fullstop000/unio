@@ -1,0 +1,23 @@
+README.md
+  s_603ee6dacfd6ff::t_f938c6227fc587 5-7
+docs/API_SUPPORT.md
+  s_603ee6dacfd6ff::t_21b36f564cac80 1-118
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "76cf595120f7c161b68c1c1e1f8bed4d41537ddb",
+  "prompts": {},
+  "sessions": {
+    "s_603ee6dacfd6ff": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4b1f-b12a-75c1-af02-0c3edd4900ad",
+        "model": "unknown"
+      },
+      "human_author": "Fullstop000 <fullstop1005@gmail.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
