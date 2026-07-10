@@ -81,3 +81,80 @@ func TestNewReportsUnavailableAgent(t *testing.T) {
 		t.Fatalf("error = %v; want not_installed", err)
 	}
 }
+
+func TestListAndGetSessionMaintainsIdentity(t *testing.T) {
+	fd := fake.New()
+	fd.SetStoredSessions([]driver.StoredSessionMeta{{SessionID: "stored-1", Title: "auth", Cwd: "/repo"}})
+	agent := newAgentWithDriver(t, fd)
+	infos, err := agent.ListSessions(context.Background())
+	if err != nil || len(infos) != 1 || infos[0].ID != "stored-1" {
+		t.Fatalf("infos=%+v err=%v", infos, err)
+	}
+	first, err := agent.GetSession(context.Background(), "stored-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := agent.GetSession(context.Background(), "stored-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first != second || first.ID() != "stored-1" || first.State() != Idle {
+		t.Fatal("GetSession must return the maintained idle handle")
+	}
+	result, err := first.Run(context.Background(), "continue")
+	if err != nil || result.Text == "" || first.ID() != "stored-1" {
+		t.Fatalf("result=%+v id=%q err=%v", result, first.ID(), err)
+	}
+}
+
+func TestGetSessionRejectsUnknownID(t *testing.T) {
+	agent := newFakeAgent(t)
+	_, err := agent.GetSession(context.Background(), "missing")
+	if !errors.Is(err, ErrSessionNotFound) {
+		t.Fatalf("error = %v; want session_not_found", err)
+	}
+}
+
+func TestBlockedContinueReturnsToIdle(t *testing.T) {
+	fd := fake.New()
+	agent := newAgentWithDriver(t, fd)
+	session, _ := agent.NewSession(context.Background())
+	fd.ScriptSession(session.key,
+		fake.Script{Blocked: &driver.BlockedReason{
+			Kind:    driver.BlockedToolApproval,
+			Options: []driver.BlockOption{{Value: "allow_once", Label: "Allow once"}},
+		}},
+		fake.Script{Items: []driver.AgentEventItem{{Kind: driver.ItemText, Text: "continued"}}},
+	)
+	blocked, err := session.Run(context.Background(), "needs approval")
+	if err != nil || blocked.Blocked == nil || session.State() != Blocked {
+		t.Fatalf("result=%+v state=%q err=%v", blocked, session.State(), err)
+	}
+	continued, err := session.Continue(context.Background(), "allow_once")
+	if err != nil || continued.Text != "continued" || session.State() != Idle {
+		t.Fatalf("result=%+v state=%q err=%v", continued, session.State(), err)
+	}
+}
+
+func TestInterruptReturnsPartialResult(t *testing.T) {
+	fd := fake.New()
+	agent := newAgentWithDriver(t, fd)
+	session, _ := agent.NewSession(context.Background())
+	gate := make(chan struct{})
+	fd.ScriptSession(session.key, fake.Script{
+		Items: []driver.AgentEventItem{{Kind: driver.ItemText, Text: "partial"}},
+		Wait:  gate,
+	})
+	stream, err := session.Stream(context.Background(), "long")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := session.Interrupt(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	result, err := stream.Result()
+	if err != nil || !result.Interrupted || session.State() != Idle {
+		t.Fatalf("result=%+v state=%q err=%v", result, session.State(), err)
+	}
+	close(gate)
+}

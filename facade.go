@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"sync/atomic"
+	"time"
 
 	"github.com/Fullstop000/unio/driver"
 	claudedrv "github.com/Fullstop000/unio/driver/claude"
@@ -75,6 +76,16 @@ type Result struct {
 	DurationMs  int64
 	Interrupted bool
 	Blocked     *BlockedReason
+}
+
+// SessionInfo is persisted conversation metadata returned by ListSessions.
+type SessionInfo struct {
+	ID           string
+	Title        string
+	Cwd          string
+	StartedAt    time.Time
+	UpdatedAt    time.Time
+	MessageCount int
 }
 
 var (

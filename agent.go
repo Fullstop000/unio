@@ -61,6 +61,80 @@ func (a *Agent) NewSession(ctx context.Context) (*Session, error) {
 	return s, nil
 }
 
+// ListSessions lists conversations known to the runtime. Maintained live
+// handles are included even when runtime history has not reached disk yet.
+func (a *Agent) ListSessions(ctx context.Context) ([]SessionInfo, error) {
+	stored, err := a.driver.ListSessions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	infos := make([]SessionInfo, 0, len(stored))
+	seen := make(map[string]struct{}, len(stored))
+	for _, meta := range stored {
+		infos = append(infos, sessionInfo(meta))
+		seen[meta.SessionID] = struct{}{}
+	}
+	a.mu.Lock()
+	for id := range a.sessions {
+		if _, ok := seen[id]; !ok {
+			infos = append(infos, SessionInfo{ID: id})
+		}
+	}
+	a.mu.Unlock()
+	return infos, nil
+}
+
+// GetSession returns the maintained handle for a persisted runtime session.
+// It does not attach to the runtime; the next Run or Stream resumes it.
+func (a *Agent) GetSession(ctx context.Context, id string) (*Session, error) {
+	if id == "" {
+		return nil, errs.SessionNotFound(id)
+	}
+	a.mu.Lock()
+	if a.closed {
+		a.mu.Unlock()
+		return nil, errs.InvalidState("agent is closed")
+	}
+	if existing := a.sessions[id]; existing != nil {
+		a.mu.Unlock()
+		return existing, nil
+	}
+	a.mu.Unlock()
+
+	stored, err := a.driver.ListSessions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	found := false
+	for _, meta := range stored {
+		if meta.SessionID == id {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return nil, errs.SessionNotFound(id)
+	}
+	candidate := newSession(a, id)
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.closed {
+		return nil, errs.InvalidState("agent is closed")
+	}
+	if existing := a.sessions[id]; existing != nil {
+		return existing, nil
+	}
+	a.sessions[id] = candidate
+	return candidate, nil
+}
+
+func sessionInfo(meta driver.StoredSessionMeta) SessionInfo {
+	return SessionInfo{
+		ID: meta.SessionID, Title: meta.Title, Cwd: meta.Cwd,
+		StartedAt: meta.StartedAt, MessageCount: meta.MessageCount,
+	}
+}
+
 func (a *Agent) register(s *Session, id string) error {
 	if id == "" {
 		return nil
