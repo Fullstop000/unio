@@ -1,0 +1,105 @@
+package driver
+
+// EventType tags a top-level AgentEvent. The event model is deliberately flat
+// (struct + string tag) rather than a Rust-style enum-with-payload, so events
+// serialise cleanly and a single envelope covers every transport.
+type EventType string
+
+const (
+	// EventLifecycle: the session transitioned to a new ProcessState.
+	EventLifecycle EventType = "lifecycle"
+	// EventSessionAttached: a session id was attached (new or resumed) for the key.
+	EventSessionAttached EventType = "session_attached"
+	// EventOutput: one content item from an in-flight run (see AgentEventItem).
+	EventOutput EventType = "output"
+	// EventCompleted: a run finished successfully; Result carries usage/finish.
+	EventCompleted EventType = "completed"
+	// EventFailed: a run failed; Err carries the reason.
+	EventFailed EventType = "failed"
+)
+
+// ItemKind tags the content of an EventOutput item.
+type ItemKind string
+
+const (
+	// ItemThinking: reasoning/thinking text.
+	ItemThinking ItemKind = "thinking"
+	// ItemText: assistant-visible text.
+	ItemText ItemKind = "text"
+	// ItemToolCall: a tool invocation. Tool + ToolInput are set. Transports MUST
+	// coalesce any deferred partial tool-call updates before emitting, so callers
+	// never observe a half-built tool call.
+	ItemToolCall ItemKind = "tool_call"
+	// ItemToolResult: the result of a tool call. Text carries the content.
+	ItemToolResult ItemKind = "tool_result"
+	// ItemTurnEnd: marks the end of a turn's content stream.
+	ItemTurnEnd ItemKind = "turn_end"
+)
+
+// AgentEventItem is one content item emitted during a run (the payload of an
+// EventOutput). Only the fields relevant to Kind are populated.
+type AgentEventItem struct {
+	Kind ItemKind
+	// Text carries thinking/text/tool-result content.
+	Text string
+	// Tool is the tool name for ItemToolCall.
+	Tool string
+	// ToolInput is the (already-coalesced) tool input for ItemToolCall. Kept as
+	// a decoded value so hosts can re-serialise or inspect it.
+	ToolInput any
+}
+
+// AgentEvent is the unified event published on a Session's EventBus. It is the
+// flattened union of Chorus's DriverEvent variants: Type selects which fields
+// are meaningful.
+//
+//   - EventLifecycle       → Key, State
+//   - EventSessionAttached → Key, SessionID
+//   - EventOutput          → Key, SessionID, RunID, Item
+//   - EventCompleted       → Key, SessionID, RunID, Result
+//   - EventFailed          → Key, SessionID, RunID, Err
+type AgentEvent struct {
+	Type      EventType
+	Key       SessionKey
+	SessionID SessionID
+	RunID     RunID
+
+	// State is set for EventLifecycle.
+	State ProcessState
+	// Item is set for EventOutput.
+	Item AgentEventItem
+	// Result is set for EventCompleted.
+	Result RunResult
+	// Err is set for EventFailed.
+	Err *AgentError
+}
+
+// --- constructor helpers (used by drivers to keep call sites terse) ---
+
+// LifecycleEvent builds an EventLifecycle.
+func LifecycleEvent(key SessionKey, state ProcessState) AgentEvent {
+	return AgentEvent{Type: EventLifecycle, Key: key, State: state, SessionID: state.SessionID, RunID: state.RunID}
+}
+
+// SessionAttachedEvent builds an EventSessionAttached.
+func SessionAttachedEvent(key SessionKey, sid SessionID) AgentEvent {
+	return AgentEvent{Type: EventSessionAttached, Key: key, SessionID: sid}
+}
+
+// OutputEvent builds an EventOutput.
+func OutputEvent(key SessionKey, sid SessionID, run RunID, item AgentEventItem) AgentEvent {
+	return AgentEvent{Type: EventOutput, Key: key, SessionID: sid, RunID: run, Item: item}
+}
+
+// CompletedEvent builds an EventCompleted.
+func CompletedEvent(key SessionKey, sid SessionID, run RunID, result RunResult) AgentEvent {
+	return AgentEvent{Type: EventCompleted, Key: key, SessionID: sid, RunID: run, Result: result}
+}
+
+// FailedEvent builds an EventFailed.
+func FailedEvent(key SessionKey, sid SessionID, run RunID, err *AgentError) AgentEvent {
+	return AgentEvent{Type: EventFailed, Key: key, SessionID: sid, RunID: run, Err: err}
+}
+
+// TypeName returns a short human-readable name for logging.
+func (e AgentEvent) TypeName() string { return string(e.Type) }
