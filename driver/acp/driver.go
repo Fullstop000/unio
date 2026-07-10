@@ -1,0 +1,114 @@
+package acp
+
+import (
+	"context"
+	"path/filepath"
+	"sync"
+
+	"github.com/Fullstop000/unio/driver"
+)
+
+// Driver implements driver.ProtocolDriver for one ACP-native runtime.
+type Driver struct {
+	cfg     runtimeConfig
+	factory transportFactory
+
+	mu      sync.Mutex
+	process *process
+}
+
+// New constructs a shared ACP v1 driver for runtime.
+func New(runtime Runtime) *Driver {
+	return newWithTransport(runtime, spawnTransport)
+}
+
+func newWithTransport(runtime Runtime, factory transportFactory) *Driver {
+	return &Driver{cfg: configFor(runtime), factory: factory}
+}
+
+func (d *Driver) Transport() driver.Transport { return driver.TransportACPNative }
+
+func (d *Driver) Probe(ctx context.Context) (driver.RuntimeProbe, error) {
+	spec := d.cfg.applyDefaults(driver.AgentSpec{})
+	if _, err := driver.ResolveExecutable(spec); err != nil {
+		return driver.RuntimeProbe{Auth: driver.AuthNotInstalled, Transport: driver.TransportACPNative}, nil
+	}
+	return driver.RuntimeProbe{Auth: driver.AuthAuthed, Transport: driver.TransportACPNative}, nil
+}
+
+func (d *Driver) ListSessions(ctx context.Context, params driver.ListSessionsParams) ([]driver.StoredSessionMeta, error) {
+	spec := d.prepareSpec(params.Spec)
+	execPath, resolveErr := driver.ResolveExecutable(spec)
+	if resolveErr != nil {
+		return nil, resolveErr
+	}
+
+	d.mu.Lock()
+	proc := d.process
+	ephemeral := proc == nil || proc.dead.Load()
+	if ephemeral {
+		proc = newProcess(d.cfg, execPath, spec, d.factory)
+	}
+	d.mu.Unlock()
+
+	if err := proc.ensureStarted(ctx); err != nil {
+		if ephemeral {
+			proc.shutdown()
+		}
+		return nil, err
+	}
+	if ephemeral {
+		defer proc.shutdown()
+	}
+	return proc.listSessions(ctx, params.Cwd)
+}
+
+func (d *Driver) OpenSession(ctx context.Context, key driver.SessionKey, spec driver.AgentSpec, params driver.OpenParams) (*driver.SessionAttachment, error) {
+	spec = d.prepareSpec(spec)
+	execPath, resolveErr := driver.ResolveExecutable(spec)
+	if resolveErr != nil {
+		return nil, resolveErr
+	}
+
+	d.mu.Lock()
+	if d.process == nil || d.process.dead.Load() {
+		d.process = newProcess(d.cfg, execPath, spec, d.factory)
+	}
+	proc := d.process
+	bus := driver.NewEventBus()
+	session := newSession(proc, key, spec, params.ResumeSessionID, bus)
+	if !proc.acquire(session) {
+		proc = newProcess(d.cfg, execPath, spec, d.factory)
+		d.process = proc
+		session.proc = proc
+		_ = proc.acquire(session)
+	}
+	d.mu.Unlock()
+	return &driver.SessionAttachment{Session: session, Events: bus}, nil
+}
+
+// Close terminates the shared ACP child. Agent normally reaches the same state
+// by closing its final session; Close is also useful to concrete-driver users.
+func (d *Driver) Close() error {
+	d.mu.Lock()
+	proc := d.process
+	d.process = nil
+	d.mu.Unlock()
+	if proc != nil {
+		proc.shutdown()
+	}
+	return nil
+}
+
+func (d *Driver) prepareSpec(spec driver.AgentSpec) driver.AgentSpec {
+	spec = d.cfg.applyDefaults(spec)
+	if spec.Cwd == "" {
+		spec.Cwd = "."
+	}
+	if absolute, err := filepath.Abs(spec.Cwd); err == nil {
+		spec.Cwd = filepath.Clean(absolute)
+	}
+	return spec
+}
+
+var _ driver.ProtocolDriver = (*Driver)(nil)

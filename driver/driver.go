@@ -224,6 +224,16 @@ type StoredSessionMeta struct {
 	Cwd          string
 }
 
+// ListSessionsParams selects which persisted sessions a driver should return.
+// An empty Cwd means every working directory known to the runtime.
+type ListSessionsParams struct {
+	// Cwd filters sessions by absolute working directory. Empty means all.
+	Cwd string
+	// Spec configures runtimes that must be started to enumerate sessions.
+	// Disk-backed drivers may ignore it.
+	Spec AgentSpec
+}
+
 // Attachment is a piece of non-text content attached to a prompt.
 type Attachment struct {
 	// Kind is "image" or "file".
@@ -294,8 +304,8 @@ type ProtocolDriver interface {
 	Probe(ctx context.Context) (RuntimeProbe, error)
 
 	// ListSessions enumerates previously-stored sessions for this runtime on
-	// this host. Drivers that cannot enumerate return an empty slice, nil.
-	ListSessions(ctx context.Context) ([]StoredSessionMeta, error)
+	// this host. Drivers that cannot enumerate return an unsupported error.
+	ListSessions(ctx context.Context, params ListSessionsParams) ([]StoredSessionMeta, error)
 
 	// OpenSession opens a session for the given key. The returned Session is in
 	// PhaseIdle; the caller must invoke Session.Run to bring it online.
