@@ -2,6 +2,9 @@
 
 Go SDK for using Claude Code and Codex through one human-aligned API.
 
+See [docs/API_SUPPORT.md](docs/API_SUPPORT.md) for the complete top-level API
+inventory and the per-Agent support matrix.
+
 ## Install
 
 ```sh
