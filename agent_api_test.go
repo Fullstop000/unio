@@ -180,6 +180,31 @@ func TestListSessionsEmptySessionsInKeepsAgentWorkspace(t *testing.T) {
 	}
 }
 
+func TestListSessionsMaxSessions(t *testing.T) {
+	fd := fake.New()
+	fd.SetStoredSessions([]driver.StoredSessionMeta{
+		{SessionID: "one", Cwd: "/repo"},
+		{SessionID: "two", Cwd: "/repo"},
+		{SessionID: "three", Cwd: "/repo"},
+	})
+	agent := newAgentWithDriverOptions(t, fd, WithCwd("/repo"))
+
+	got, err := agent.ListSessions(context.Background(), MaxSessions(2))
+	if err != nil || len(got) != 2 || got[0].ID != "one" || got[1].ID != "two" {
+		t.Fatalf("sessions=%+v err=%v", got, err)
+	}
+
+	all, err := agent.ListSessions(context.Background(), MaxSessions(0))
+	if err != nil || len(all) != 3 {
+		t.Fatalf("sessions=%+v err=%v", all, err)
+	}
+
+	all, err = agent.ListSessions(context.Background(), MaxSessions(3))
+	if err != nil || len(all) != 3 {
+		t.Fatalf("sessions=%+v err=%v", all, err)
+	}
+}
+
 func TestGetSessionRejectsUnknownID(t *testing.T) {
 	agent := newFakeAgent(t)
 	_, err := agent.GetSession(context.Background(), "missing")

@@ -63,9 +63,9 @@ func (a *Agent) NewSession(ctx context.Context) (*Session, error) {
 }
 
 // ListSessions lists conversations for the Agent's working directory.
-// SessionsIn selects another directory and AllSessions removes the directory
-// filter. Maintained live handles are included even when runtime history has
-// not reached disk yet.
+// SessionsIn selects another directory, AllSessions removes the directory
+// filter, and MaxSessions caps the number of returned conversations. Maintained
+// live handles are included even when runtime history has not reached disk yet.
 func (a *Agent) ListSessions(ctx context.Context, opts ...ListSessionsOption) ([]SessionInfo, error) {
 	if a.closed.Load() {
 		return nil, errs.InvalidState("agent is closed")
@@ -96,6 +96,9 @@ func (a *Agent) ListSessions(ctx context.Context, opts ...ListSessionsOption) ([
 		}
 	}
 	a.mu.Unlock()
+	if listCfg.limit > 0 && len(infos) > listCfg.limit {
+		infos = infos[:listCfg.limit]
+	}
 	return infos, nil
 }
 

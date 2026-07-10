@@ -81,9 +81,10 @@ The SDK never synthesizes a replacement for the runtime's canonical ID.
 
 `ListSessions` returns persisted runtime metadata for the Agent's working
 directory by default. `SessionsIn(dir)` selects another working directory and
-`AllSessions()` removes the filter. Drivers may page internally, but pagination
-is not part of the public SDK contract. Unsupported listing returns an
-`unsupported` error rather than an empty successful result.
+`AllSessions()` removes the filter. `MaxSessions(n)` caps the final result when
+n is positive; a non-positive n leaves it unlimited. Drivers may page
+internally, but pagination is not part of the public SDK contract. Unsupported
+listing returns an `unsupported` error rather than an empty successful result.
 
 `GetSession(id)` returns the one maintained handle for that runtime ID. An
 unknown ID returns `session_not_found`. It performs no visible resume work; the

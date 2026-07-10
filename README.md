@@ -94,8 +94,10 @@ result, err := session.Run(ctx, "Continue the previous work")
 ```
 
 `ListSessions` defaults to the Agent's working directory. Use
-`ListSessions(ctx, unio.SessionsIn(dir))` for another workspace or
-`ListSessions(ctx, unio.AllSessions())` for every workspace.
+`ListSessions(ctx, unio.SessionsIn(dir))` for another workspace,
+`ListSessions(ctx, unio.AllSessions())` for every workspace, or
+`ListSessions(ctx, unio.MaxSessions(20))` to cap the returned conversations.
+Options can be combined.
 
 `Session.State()` exposes only `Idle`, `Running`, and `Blocked`. Runtime process
 and transport lifecycle remain internal.
