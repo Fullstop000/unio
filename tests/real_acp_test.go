@@ -130,6 +130,28 @@ func TestReal_ACP_OpenCodeProtocol(t *testing.T) {
 	if err := att.Session.Close(ctx); err != nil {
 		t.Fatal(err)
 	}
+	if len(listed) > 0 {
+		resumeSpec := spec
+		if listed[0].Cwd != "" {
+			resumeSpec.Cwd = listed[0].Cwd
+		}
+		resumeDriver := acp.New(acp.OpenCode)
+		defer resumeDriver.Close()
+		resumed, err := resumeDriver.OpenSession(ctx, "opencode-resume", resumeSpec, driver.OpenParams{ResumeSessionID: listed[0].SessionID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resumed.Events.Subscribe()
+		if err := resumed.Session.Run(ctx, nil); err != nil {
+			t.Fatalf("session/resume: %v", err)
+		}
+		if resumed.Session.SessionID() != listed[0].SessionID {
+			t.Fatalf("resumed ID = %q, want %q", resumed.Session.SessionID(), listed[0].SessionID)
+		}
+		if err := resumed.Session.Close(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 
 func TestReal_ACP_TraeXResume(t *testing.T) {
