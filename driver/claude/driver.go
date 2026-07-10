@@ -41,10 +41,8 @@ func (d *Driver) Probe(ctx context.Context) (driver.RuntimeProbe, error) {
 	return driver.RuntimeProbe{Auth: driver.AuthAuthed, Transport: driver.TransportClaudeStreamJSON}, nil
 }
 
-// ListSessions is not implemented for Claude yet (would scan
-// ~/.claude/projects). Returns empty rather than erroring.
 func (d *Driver) ListSessions(ctx context.Context) ([]driver.StoredSessionMeta, error) {
-	return nil, nil
+	return listStoredSessions(ctx)
 }
 
 // OpenSession resolves the executable (surfacing not_installed early) and builds

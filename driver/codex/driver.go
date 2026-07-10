@@ -42,9 +42,8 @@ func (d *Driver) Probe(ctx context.Context) (driver.RuntimeProbe, error) {
 	return driver.RuntimeProbe{Auth: driver.AuthAuthed, Transport: driver.TransportCodexAppServer}, nil
 }
 
-// ListSessions is not implemented yet (would scan ~/.codex/sessions).
 func (d *Driver) ListSessions(ctx context.Context) ([]driver.StoredSessionMeta, error) {
-	return nil, nil
+	return listStoredSessions(ctx)
 }
 
 // OpenSession resolves the executable early (not_installed) and builds an idle
