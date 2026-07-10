@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/Fullstop000/unio/driver"
 	errcontract "github.com/Fullstop000/unio/errs"
@@ -79,6 +80,7 @@ func (d *Driver) getProcess(execPath string, spec driver.AgentSpec) *process {
 	if d.process == nil || d.process.IsStale() {
 		d.process = newProcess(execPath, spec, d.factory, clientVersion)
 	}
+	d.process.acquire()
 	return d.process
 }
 
@@ -243,11 +245,15 @@ func (s *session) Prompt(ctx context.Context, req driver.PromptReq) (driver.RunI
 	ev, err := waitResp(ctx, ch, s.proc.closed)
 	if err != nil {
 		aerr := toAgentErr(err)
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			s.stopSubmittedTurn(ch)
+		}
 		s.bus.Emit(driver.FailedEvent(s.key, threadID, runID, aerr))
 		return runID, aerr
 	}
 	if ev.Type == EvError {
 		aerr := driver.NewRuntimeReportedError(ev.ErrMsg)
+		s.clearSubmittedTurn()
 		s.bus.Emit(driver.FailedEvent(s.key, threadID, runID, aerr))
 		return runID, aerr
 	}
@@ -263,6 +269,10 @@ func (s *session) Prompt(ctx context.Context, req driver.PromptReq) (driver.RunI
 func (s *session) Interrupt(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.interruptLocked(ctx)
+}
+
+func (s *session) interruptLocked(ctx context.Context) error {
 	if s.closed {
 		return nil
 	}
@@ -289,6 +299,42 @@ func (s *session) Interrupt(ctx context.Context) error {
 	case <-s.proc.closed:
 		return driver.NewTransportError("codex app-server closed while interrupting")
 	}
+}
+
+// stopSubmittedTurn resolves the ambiguous interval after turn/start was
+// written but its acknowledgement lost the race with context cancellation.
+// It prefers a normal turn interrupt; if acknowledgement/interrupt cannot be
+// confirmed promptly, it tears down and reaps the shared process before
+// Prompt returns, so the public session can never expose a false Idle state.
+func (s *session) stopSubmittedTurn(ch chan AppServerEvent) {
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ev, err := waitResp(cleanupCtx, ch, s.proc.closed)
+	if err == nil {
+		if ev.Type == EvError {
+			s.clearSubmittedTurn()
+			cancel()
+			return
+		}
+		if ev.Type == EvTurnResponse && ev.TurnID != "" {
+			s.turnID.Store(&ev.TurnID)
+			s.proc.mapTurn(ev.TurnID, s.SessionID())
+		}
+		turnID := s.turnID.Load()
+		if s.currentRun() == "" || (turnID != nil && *turnID != "" && s.interruptLocked(cleanupCtx) == nil) {
+			cancel()
+			return
+		}
+	}
+	cancel()
+	s.proc.shutdown()
+	<-s.proc.closed
+}
+
+func (s *session) clearSubmittedTurn() {
+	s.curRun.Store(ptr(""))
+	s.turnID.Store(ptr(""))
+	s.finishTurnDone()
+	s.setState(driver.ProcessState{Phase: driver.PhaseActive, SessionID: s.SessionID()})
 }
 
 func (s *session) Continue(ctx context.Context, input string) (driver.RunID, error) {
@@ -363,13 +409,13 @@ func (s *session) Close(ctx context.Context) error {
 	s.closed = true
 	s.mu.Unlock()
 
-	last := false
 	if tid := s.SessionID(); tid != "" {
-		last = s.proc.unregisterSession(tid)
+		s.proc.unregisterSession(tid)
 	}
+	wait := s.proc.release()
 	s.setState(driver.ProcessState{Phase: driver.PhaseClosed, SessionID: s.SessionID()})
 	s.bus.Close()
-	if last {
+	if wait {
 		select {
 		case <-s.proc.closed:
 		case <-ctx.Done():

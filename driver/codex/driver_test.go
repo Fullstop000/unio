@@ -31,6 +31,10 @@ type scriptedServer struct {
 	requestApproval  bool
 	approvalDecision string
 	activeTurnID     string
+	holdTurn         bool
+	turnStartSeen    chan struct{}
+	turnStartGate    chan struct{}
+	interruptSeen    chan struct{}
 	killed           chan struct{}
 	waited           chan struct{}
 }
@@ -95,6 +99,16 @@ func (s *scriptedServer) loop() {
 			s.send(map[string]any{"id": idv, "result": map[string]any{"thread": map[string]any{"id": s.threadID}}})
 		case "turn/start":
 			s.mu.Lock()
+			turnStartSeen := s.turnStartSeen
+			turnStartGate := s.turnStartGate
+			s.mu.Unlock()
+			if turnStartSeen != nil {
+				close(turnStartSeen)
+			}
+			if turnStartGate != nil {
+				<-turnStartGate
+			}
+			s.mu.Lock()
 			s.turnSeq++
 			turnID := "turn-" + string(rune('a'+s.turnSeq-1))
 			omitThreadID := s.omitThreadID
@@ -103,6 +117,7 @@ func (s *scriptedServer) loop() {
 			s.mu.Lock()
 			s.activeTurnID = turnID
 			requestApproval := s.requestApproval
+			holdTurn := s.holdTurn
 			s.mu.Unlock()
 			// turn/start response, then a streamed turn.
 			turnResp := map[string]any{}
@@ -125,10 +140,19 @@ func (s *scriptedServer) loop() {
 				s.send(map[string]any{"id": 42, "method": "item/commandExecution/requestApproval", "params": map[string]any{"threadId": s.threadID, "turnId": turnID, "itemId": "cmd-1"}})
 				continue
 			}
+			if holdTurn {
+				continue
+			}
 			s.send(map[string]any{"method": "item/agentMessage/delta", "params": deltaParams})
 			s.send(map[string]any{"method": "thread/tokenUsage/updated", "params": usageParams})
 			s.send(map[string]any{"method": "turn/completed", "params": doneParams})
 		case "turn/interrupt":
+			s.mu.Lock()
+			interruptSeen := s.interruptSeen
+			s.mu.Unlock()
+			if interruptSeen != nil {
+				close(interruptSeen)
+			}
 			s.send(map[string]any{"id": idv, "result": map[string]any{}})
 			// emit the interrupted completion for the current turn.
 			s.mu.Lock()
@@ -435,6 +459,49 @@ func TestCodexProcessLifetimeDoesNotUseTurnContext(t *testing.T) {
 	_ = att.Session.Close(context.Background())
 }
 
+func TestCodexPromptCancellationWaitsForConfirmedInterrupt(t *testing.T) {
+	srv := newScriptedServer()
+	srv.holdTurn = true
+	srv.turnStartSeen = make(chan struct{})
+	srv.turnStartGate = make(chan struct{})
+	srv.interruptSeen = make(chan struct{})
+	d := newWithTransport(func(context.Context, string, driver.AgentSpec) (stdioTransport, error) { return srv, nil })
+	att, err := d.OpenSession(context.Background(), "cancel-submit", driver.AgentSpec{ExecutablePath: fakeCodex(t)}, driver.OpenParams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer att.Session.Close(context.Background())
+	if err := att.Session.Run(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := att.Session.Prompt(ctx, driver.PromptReq{Text: "long"})
+		done <- err
+	}()
+	<-srv.turnStartSeen
+	cancel()
+	returnedEarly := false
+	select {
+	case <-done:
+		returnedEarly = true
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(srv.turnStartGate)
+	if returnedEarly {
+		t.Fatal("Prompt returned before the submitted turn could be interrupted")
+	}
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("Prompt error = %v; want context.Canceled", err)
+	}
+	select {
+	case <-srv.interruptSeen:
+	case <-time.After(time.Second):
+		t.Fatal("cancelled Prompt did not send turn/interrupt")
+	}
+}
+
 func TestWaitRespPreservesContextCause(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -469,6 +536,14 @@ func TestCodexMissingResumeDoesNotStartFresh(t *testing.T) {
 	err = att.Session.Run(context.Background(), nil)
 	if kind, ok := driverErrorKind(err); !ok || kind != driver.ErrSessionNotFound {
 		t.Fatalf("resume error = %v", err)
+	}
+	if err := att.Session.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-srv.waited:
+	case <-time.After(time.Second):
+		t.Fatal("failed pre-registration session did not reap its app-server")
 	}
 }
 

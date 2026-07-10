@@ -117,6 +117,9 @@ type process struct {
 	sessions map[string]*session
 	// turnToThread maps turnId → threadId (some events carry only turnId).
 	turnToThread map[string]string
+	// leases counts opened session attachments, including sessions that have
+	// started the child but have not yet acquired a runtime thread ID.
+	leases int
 
 	closed chan struct{}
 }
@@ -219,15 +222,32 @@ func (p *process) registerSession(threadID string, s *session) {
 	p.mu.Unlock()
 }
 
-func (p *process) unregisterSession(threadID string) bool {
+func (p *process) unregisterSession(threadID string) {
 	p.mu.Lock()
 	delete(p.sessions, threadID)
-	empty := len(p.sessions) == 0
 	p.mu.Unlock()
-	if empty {
+}
+
+func (p *process) acquire() {
+	p.mu.Lock()
+	p.leases++
+	p.mu.Unlock()
+}
+
+// release drops one attachment lease. It shuts down the child when the last
+// attachment goes away and reports whether the caller must await p.closed.
+func (p *process) release() bool {
+	p.mu.Lock()
+	if p.leases > 0 {
+		p.leases--
+	}
+	last := p.leases == 0
+	hasTransport := p.tr != nil
+	p.mu.Unlock()
+	if last {
 		p.shutdown()
 	}
-	return empty
+	return last && hasTransport
 }
 
 func (p *process) sessionForThread(threadID string) *session {
