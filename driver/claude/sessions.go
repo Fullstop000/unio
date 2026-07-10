@@ -22,7 +22,7 @@ var claudeSessionsRoot = func() (string, error) {
 	return filepath.Join(home, ".claude", "projects"), nil
 }
 
-func listStoredSessions(ctx context.Context) ([]driver.StoredSessionMeta, error) {
+func listStoredSessions(ctx context.Context, cwd string) ([]driver.StoredSessionMeta, error) {
 	root, err := claudeSessionsRoot()
 	if err != nil {
 		return nil, driver.NewTransportError("claude: locate session history: " + err.Error())
@@ -42,7 +42,7 @@ func listStoredSessions(ctx context.Context) ([]driver.StoredSessionMeta, error)
 			return nil
 		}
 		meta, ok := readClaudeSession(path)
-		if ok {
+		if ok && (cwd == "" || filepath.Clean(meta.Cwd) == filepath.Clean(cwd)) {
 			out = append(out, meta)
 		}
 		return nil

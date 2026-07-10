@@ -23,7 +23,7 @@ var codexSessionsRoot = func() (string, error) {
 	return filepath.Join(home, ".codex", "sessions"), nil
 }
 
-func listStoredSessions(ctx context.Context) ([]driver.StoredSessionMeta, error) {
+func listStoredSessions(ctx context.Context, cwd string) ([]driver.StoredSessionMeta, error) {
 	root, err := codexSessionsRoot()
 	if err != nil {
 		return nil, driver.NewTransportError("codex: locate session history: " + err.Error())
@@ -43,7 +43,7 @@ func listStoredSessions(ctx context.Context) ([]driver.StoredSessionMeta, error)
 			return nil
 		}
 		meta, ok := readCodexSession(path)
-		if ok {
+		if ok && (cwd == "" || filepath.Clean(meta.Cwd) == filepath.Clean(cwd)) {
 			out = append(out, meta)
 		}
 		return nil

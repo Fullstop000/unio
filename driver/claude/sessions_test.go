@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/Fullstop000/unio/driver"
 )
 
 func TestListSessionsReadsClaudeHistory(t *testing.T) {
@@ -20,15 +22,23 @@ func TestListSessionsReadsClaudeHistory(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(project, "session-1.jsonl"), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	other := `{"type":"user","sessionId":"session-2","cwd":"/repo/other","message":{"role":"user","content":"Other"}}` + "\n"
+	if err := os.WriteFile(filepath.Join(project, "session-2.jsonl"), []byte(other), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	original := claudeSessionsRoot
 	claudeSessionsRoot = func() (string, error) { return root, nil }
 	t.Cleanup(func() { claudeSessionsRoot = original })
 
-	got, err := New().ListSessions(context.Background())
+	got, err := New().ListSessions(context.Background(), driver.ListSessionsParams{Cwd: "/repo/api"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(got) != 1 || got[0].SessionID != "session-1" || got[0].Title != "Refactor auth" || got[0].Cwd != "/repo/api" || got[0].MessageCount != 2 || got[0].UpdatedAt.IsZero() {
 		t.Fatalf("sessions = %+v", got)
+	}
+	all, err := New().ListSessions(context.Background(), driver.ListSessionsParams{})
+	if err != nil || len(all) != 2 {
+		t.Fatalf("all sessions = %+v, err = %v", all, err)
 	}
 }

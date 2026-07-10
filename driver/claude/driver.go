@@ -41,8 +41,8 @@ func (d *Driver) Probe(ctx context.Context) (driver.RuntimeProbe, error) {
 	return driver.RuntimeProbe{Auth: driver.AuthAuthed, Transport: driver.TransportClaudeStreamJSON}, nil
 }
 
-func (d *Driver) ListSessions(ctx context.Context) ([]driver.StoredSessionMeta, error) {
-	return listStoredSessions(ctx)
+func (d *Driver) ListSessions(ctx context.Context, params driver.ListSessionsParams) ([]driver.StoredSessionMeta, error) {
+	return listStoredSessions(ctx, params.Cwd)
 }
 
 // OpenSession resolves the executable (surfacing not_installed early) and builds

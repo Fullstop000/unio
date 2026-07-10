@@ -13,11 +13,15 @@ import (
 )
 
 func newAgentWithDriver(t *testing.T, fd *fake.Driver) *Agent {
+	return newAgentWithDriverOptions(t, fd)
+}
+
+func newAgentWithDriverOptions(t *testing.T, fd *fake.Driver, opts ...Option) *Agent {
 	t.Helper()
 	prev := driverOverride
 	driverOverride = func(AgentKind) (driver.ProtocolDriver, bool) { return fd, true }
 	t.Cleanup(func() { driverOverride = prev })
-	agent, err := New(Claude)
+	agent, err := New(Claude, opts...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,10 +88,22 @@ func TestNewReportsUnavailableAgent(t *testing.T) {
 	}
 }
 
+func TestACPAgentKindsUseTheSharedDriver(t *testing.T) {
+	for _, kind := range []AgentKind{Kimi, TraeX, OpenCode} {
+		d, err := driverFor(kind)
+		if err != nil {
+			t.Fatalf("driverFor(%q): %v", kind, err)
+		}
+		if d.Transport() != driver.TransportACPNative {
+			t.Fatalf("driverFor(%q) transport = %q", kind, d.Transport())
+		}
+	}
+}
+
 func TestListAndGetSessionMaintainsIdentity(t *testing.T) {
 	fd := fake.New()
 	fd.SetStoredSessions([]driver.StoredSessionMeta{{SessionID: "stored-1", Title: "auth", Cwd: "/repo"}})
-	agent := newAgentWithDriver(t, fd)
+	agent := newAgentWithDriverOptions(t, fd, WithCwd("/repo"))
 	infos, err := agent.ListSessions(context.Background())
 	if err != nil || len(infos) != 1 || infos[0].ID != "stored-1" {
 		t.Fatalf("infos=%+v err=%v", infos, err)
@@ -106,6 +122,61 @@ func TestListAndGetSessionMaintainsIdentity(t *testing.T) {
 	result, err := first.Run(context.Background(), "continue")
 	if err != nil || result.Text == "" || first.ID() != "stored-1" {
 		t.Fatalf("result=%+v id=%q err=%v", result, first.ID(), err)
+	}
+}
+
+func TestListSessionsFiltersByWorkspace(t *testing.T) {
+	fd := fake.New()
+	fd.SetStoredSessions([]driver.StoredSessionMeta{
+		{SessionID: "repo-a", Cwd: "/repo/a"},
+		{SessionID: "repo-b", Cwd: "/repo/b"},
+	})
+	agent := newAgentWithDriverOptions(t, fd, WithCwd("/repo/a"))
+
+	current, err := agent.ListSessions(context.Background())
+	if err != nil || len(current) != 1 || current[0].ID != "repo-a" {
+		t.Fatalf("current=%+v err=%v", current, err)
+	}
+	other, err := agent.ListSessions(context.Background(), SessionsIn("/repo/b"))
+	if err != nil || len(other) != 1 || other[0].ID != "repo-b" {
+		t.Fatalf("other=%+v err=%v", other, err)
+	}
+	all, err := agent.ListSessions(context.Background(), AllSessions())
+	if err != nil || len(all) != 2 {
+		t.Fatalf("all=%+v err=%v", all, err)
+	}
+}
+
+func TestListSessionsFiltersMaintainedHandles(t *testing.T) {
+	agent := newAgentWithDriverOptions(t, fake.New(), WithCwd("/repo/a"))
+	session, err := agent.NewSession(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := session.Run(context.Background(), "hello"); err != nil {
+		t.Fatal(err)
+	}
+
+	current, err := agent.ListSessions(context.Background())
+	if err != nil || len(current) != 1 || current[0].Cwd != "/repo/a" {
+		t.Fatalf("current=%+v err=%v", current, err)
+	}
+	other, err := agent.ListSessions(context.Background(), SessionsIn("/repo/b"))
+	if err != nil || len(other) != 0 {
+		t.Fatalf("other=%+v err=%v", other, err)
+	}
+}
+
+func TestListSessionsEmptySessionsInKeepsAgentWorkspace(t *testing.T) {
+	fd := fake.New()
+	fd.SetStoredSessions([]driver.StoredSessionMeta{
+		{SessionID: "repo-a", Cwd: "/repo/a"},
+		{SessionID: "repo-b", Cwd: "/repo/b"},
+	})
+	agent := newAgentWithDriverOptions(t, fd, WithCwd("/repo/a"))
+	got, err := agent.ListSessions(context.Background(), SessionsIn(""))
+	if err != nil || len(got) != 1 || got[0].ID != "repo-a" {
+		t.Fatalf("sessions=%+v err=%v", got, err)
 	}
 }
 

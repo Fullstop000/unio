@@ -255,8 +255,11 @@ func TestFakeProbeAndListSessions(t *testing.T) {
 	if err != nil || pr.Auth != driver.AuthAuthed || pr.Transport != driver.TransportFake {
 		t.Fatalf("unexpected probe: %+v err=%v", pr, err)
 	}
-	d.SetStoredSessions([]driver.StoredSessionMeta{{SessionID: "old-1", Title: "t"}})
-	metas, err := d.ListSessions(context.Background())
+	d.SetStoredSessions([]driver.StoredSessionMeta{
+		{SessionID: "old-1", Title: "t", Cwd: "/repo/a"},
+		{SessionID: "old-2", Title: "t", Cwd: "/repo/b"},
+	})
+	metas, err := d.ListSessions(context.Background(), driver.ListSessionsParams{Cwd: "/repo/a"})
 	if err != nil || len(metas) != 1 || metas[0].SessionID != "old-1" {
 		t.Fatalf("unexpected ListSessions: %+v err=%v", metas, err)
 	}

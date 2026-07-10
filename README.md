@@ -1,6 +1,11 @@
 # unio
 
-Go SDK for using Claude Code and Codex through one human-aligned API.
+Go SDK for using Claude Code, Codex, and ACP-native agents through one
+human-aligned API.
+
+Built-in ACP v1 runtimes are selected with `unio.Kimi`, `unio.TraeX`, and
+`unio.OpenCode`. TraeX executable discovery recognizes `traex`, `trae-cli`,
+`coco`, and `traecli`.
 
 ## Install
 
@@ -87,6 +92,10 @@ session, err := agent.GetSession(ctx, sessions[0].ID)
 // Runtime resume is automatic.
 result, err := session.Run(ctx, "Continue the previous work")
 ```
+
+`ListSessions` defaults to the Agent's working directory. Use
+`ListSessions(ctx, unio.SessionsIn(dir))` for another workspace or
+`ListSessions(ctx, unio.AllSessions())` for every workspace.
 
 `Session.State()` exposes only `Idle`, `Running`, and `Blocked`. Runtime process
 and transport lifecycle remain internal.
