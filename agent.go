@@ -57,18 +57,26 @@ func (a *Agent) NewSession(ctx context.Context) (*Session, error) {
 	if a.closed.Load() {
 		return nil, errs.InvalidState("agent is closed")
 	}
-	s := newSession(a, "", "")
+	s := newSession(a, "", normalizeCwd(a.cfg.spec().Cwd))
 	a.pending[s] = struct{}{}
 	return s, nil
 }
 
-// ListSessions lists conversations known to the runtime. Maintained live
-// handles are included even when runtime history has not reached disk yet.
-func (a *Agent) ListSessions(ctx context.Context) ([]SessionInfo, error) {
+// ListSessions lists conversations for the Agent's working directory.
+// SessionsIn selects another directory and AllSessions removes the directory
+// filter. Maintained live handles are included even when runtime history has
+// not reached disk yet.
+func (a *Agent) ListSessions(ctx context.Context, opts ...ListSessionsOption) ([]SessionInfo, error) {
 	if a.closed.Load() {
 		return nil, errs.InvalidState("agent is closed")
 	}
-	stored, err := a.driver.ListSessions(ctx)
+	spec := a.cfg.spec()
+	listCfg := buildListSessionsConfig(spec.Cwd, opts)
+	params := driver.ListSessionsParams{Cwd: listCfg.cwd, Spec: spec}
+	if listCfg.all {
+		params.Cwd = ""
+	}
+	stored, err := a.driver.ListSessions(ctx, params)
 	if err != nil {
 		return nil, err
 	}
@@ -79,9 +87,12 @@ func (a *Agent) ListSessions(ctx context.Context) ([]SessionInfo, error) {
 		seen[meta.SessionID] = struct{}{}
 	}
 	a.mu.Lock()
-	for id := range a.sessions {
+	for id, session := range a.sessions {
+		if params.Cwd != "" && normalizeCwd(session.cwd) != params.Cwd {
+			continue
+		}
 		if _, ok := seen[id]; !ok {
-			infos = append(infos, SessionInfo{ID: id})
+			infos = append(infos, SessionInfo{ID: id, Cwd: session.cwd})
 		}
 	}
 	a.mu.Unlock()
@@ -104,7 +115,7 @@ func (a *Agent) GetSession(ctx context.Context, id string) (*Session, error) {
 	}
 	a.mu.Unlock()
 
-	stored, err := a.driver.ListSessions(ctx)
+	stored, err := a.driver.ListSessions(ctx, driver.ListSessionsParams{Spec: a.cfg.spec()})
 	if err != nil {
 		return nil, err
 	}

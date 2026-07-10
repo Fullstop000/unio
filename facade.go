@@ -4,10 +4,12 @@ package unio
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync/atomic"
 	"time"
 
 	"github.com/Fullstop000/unio/driver"
+	acpdrv "github.com/Fullstop000/unio/driver/acp"
 	claudedrv "github.com/Fullstop000/unio/driver/claude"
 	codexdrv "github.com/Fullstop000/unio/driver/codex"
 	"github.com/Fullstop000/unio/errs"
@@ -17,8 +19,16 @@ import (
 type AgentKind string
 
 const (
+	// Claude selects the Claude Code stream-JSON driver.
 	Claude AgentKind = "claude"
-	Codex  AgentKind = "codex"
+	// Codex selects the Codex app-server driver.
+	Codex AgentKind = "codex"
+	// Kimi selects Kimi CLI through the shared ACP v1 driver.
+	Kimi AgentKind = "kimi"
+	// TraeX selects Trae CLI through the shared ACP v1 driver.
+	TraeX AgentKind = "traex"
+	// OpenCode selects OpenCode through the shared ACP v1 driver.
+	OpenCode AgentKind = "opencode"
 )
 
 // SessionState is the state a person can observe while using a session.
@@ -88,6 +98,34 @@ type SessionInfo struct {
 	MessageCount int
 }
 
+// ListSessionsOption narrows which persisted conversations ListSessions returns.
+type ListSessionsOption func(*listSessionsConfig)
+
+type listSessionsConfig struct {
+	cwd string
+	all bool
+}
+
+// SessionsIn lists conversations belonging to dir instead of the Agent's
+// configured working directory.
+func SessionsIn(dir string) ListSessionsOption {
+	return func(c *listSessionsConfig) {
+		if dir != "" {
+			c.cwd = normalizeCwd(dir)
+		}
+		c.all = false
+	}
+}
+
+// AllSessions lists conversations from every working directory known to the
+// runtime.
+func AllSessions() ListSessionsOption {
+	return func(c *listSessionsConfig) {
+		c.cwd = ""
+		c.all = true
+	}
+}
+
 var (
 	ErrInvalidState    = errs.New(errs.KindInvalidState, "")
 	ErrSessionNotFound = errs.New(errs.KindSessionNotFound, "")
@@ -131,6 +169,12 @@ func driverFor(kind AgentKind) (driver.ProtocolDriver, error) {
 		return claudedrv.New(), nil
 	case Codex:
 		return codexdrv.New(), nil
+	case Kimi:
+		return acpdrv.New(acpdrv.Kimi), nil
+	case TraeX:
+		return acpdrv.New(acpdrv.TraeX), nil
+	case OpenCode:
+		return acpdrv.New(acpdrv.OpenCode), nil
 	default:
 		return nil, fmt.Errorf("unio: unknown agent %q", kind)
 	}
@@ -142,6 +186,24 @@ func buildConfig(opts []Option) config {
 		opt(&c)
 	}
 	return c
+}
+
+func buildListSessionsConfig(defaultCwd string, opts []ListSessionsOption) listSessionsConfig {
+	c := listSessionsConfig{cwd: normalizeCwd(defaultCwd)}
+	for _, opt := range opts {
+		opt(&c)
+	}
+	return c
+}
+
+func normalizeCwd(dir string) string {
+	if dir == "" {
+		return ""
+	}
+	if abs, err := filepath.Abs(dir); err == nil {
+		return filepath.Clean(abs)
+	}
+	return filepath.Clean(dir)
 }
 
 func (c config) spec() driver.AgentSpec {

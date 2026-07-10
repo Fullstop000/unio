@@ -69,7 +69,7 @@ missing CLI returns `not_installed`; an unavailable authentication state returns
 an error rather than a half-initialized Agent.
 
 One Agent owns one concrete driver for its lifetime. Multiplexing runtimes such
-as Codex share one child process across that Agent's sessions.
+as Codex and ACP v1 agents share one child process across that Agent's sessions.
 
 ### New session and ID
 
@@ -79,8 +79,11 @@ The SDK never synthesizes a replacement for the runtime's canonical ID.
 
 ### List and get session
 
-`ListSessions` returns persisted runtime metadata. Unsupported listing returns
-an `unsupported` error rather than an empty successful result.
+`ListSessions` returns persisted runtime metadata for the Agent's working
+directory by default. `SessionsIn(dir)` selects another working directory and
+`AllSessions()` removes the filter. Drivers may page internally, but pagination
+is not part of the public SDK contract. Unsupported listing returns an
+`unsupported` error rather than an empty successful result.
 
 `GetSession(id)` returns the one maintained handle for that runtime ID. An
 unknown ID returns `session_not_found`. It performs no visible resume work; the

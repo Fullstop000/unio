@@ -103,7 +103,6 @@ type process struct {
 
 	startOnce sync.Once
 	startErr  error
-	started   atomic.Bool
 	dead      atomic.Bool
 	lifecycle sync.Mutex
 
@@ -189,7 +188,6 @@ func (p *process) ensureStarted(ctx context.Context) error {
 			p.shutdown()
 			return
 		}
-		p.started.Store(true)
 	})
 	return p.startErr
 }

@@ -8,6 +8,7 @@ package fake
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 
@@ -93,11 +94,15 @@ func (d *Driver) Probe(ctx context.Context) (driver.RuntimeProbe, error) {
 }
 
 // ListSessions implements driver.ProtocolDriver.
-func (d *Driver) ListSessions(ctx context.Context) ([]driver.StoredSessionMeta, error) {
+func (d *Driver) ListSessions(ctx context.Context, params driver.ListSessionsParams) ([]driver.StoredSessionMeta, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	out := make([]driver.StoredSessionMeta, len(d.stored))
-	copy(out, d.stored)
+	out := make([]driver.StoredSessionMeta, 0, len(d.stored))
+	for _, meta := range d.stored {
+		if params.Cwd == "" || filepath.Clean(meta.Cwd) == filepath.Clean(params.Cwd) {
+			out = append(out, meta)
+		}
+	}
 	return out, nil
 }
 

@@ -7,6 +7,8 @@
 - Added public `Idle`, `Running`, and `Blocked` session states.
 - Added human-aligned `Interrupt` and blocked `Continue` behavior.
 - Added persisted Claude Code and Codex session discovery.
+- Added cwd-scoped session listing with explicit cross-workspace listing.
+- Added a shared ACP v1 driver for Kimi, TraeX, and OpenCode.
 - Added per-Agent Codex app-server process sharing.
 
 ## v0.1.0 - 2026-07-09
