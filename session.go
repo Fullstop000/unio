@@ -8,121 +8,188 @@ import (
 	"github.com/Fullstop000/unio/errs"
 )
 
-// Run drives one prompt to completion and returns the result. It is the
-// one-liner for the common case: open a session, send the prompt, wait for the
-// result, and close. An agent-reported failure (or transport death) is returned
-// as an error; a not_installed agent likewise errors here.
-func Run(ctx context.Context, agent Agent, prompt string, opts ...Option) (Result, error) {
-	s, err := Start(ctx, agent, opts...)
+// Session is one conversation with an Agent.
+type Session struct {
+	agent *Agent
+	key   driver.SessionKey
+
+	mu            sync.Mutex
+	state         SessionState
+	id            string
+	inner         driver.Session
+	events        <-chan driver.AgentEvent
+	active        *Stream
+	closedByAgent bool
+}
+
+func newSession(agent *Agent, id string) *Session {
+	return &Session{agent: agent, key: autoKey(agent.kind), id: id, state: Idle}
+}
+
+// ID returns the runtime-owned session ID. A new session has no runtime ID
+// until its first Run or Stream starts, so ID returns "" before then. A session
+// returned by GetSession has its known ID immediately.
+func (s *Session) ID() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.id
+}
+
+// State returns Idle, Running, or Blocked.
+func (s *Session) State() SessionState {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.state
+}
+
+// Run sends one prompt and waits for completion, interruption, or blocking.
+func (s *Session) Run(ctx context.Context, prompt string) (Result, error) {
+	stream, err := s.Stream(ctx, prompt)
 	if err != nil {
 		return Result{}, err
 	}
-	defer s.Close()
-	return s.Prompt(ctx, prompt).Result()
+	return stream.Result()
 }
 
-// Session is the ergonomic handle for a multi-turn conversation. It owns the
-// underlying driver session, its event bus, and the (auto-generated) key, so
-// callers never touch SessionKey/AgentSpec/subscription timing.
-//
-// A Session's prompts are strictly SERIAL: it exposes one shared event stream,
-// so at most one turn may be in flight at a time. Prompt returns an error-loaded
-// Stream if a prior turn hasn't been drained. This matches the agents' own
-// model (a Codex thread / a Claude process handles one turn at a time); to run
-// turns in parallel, open multiple Sessions.
-type Session struct {
-	inner driver.Session
-	sub   <-chan driver.AgentEvent
-
-	mu   sync.Mutex
-	busy bool // true while a turn's Stream is active
-}
-
-// Start starts a session and brings it online, ready for prompts. It resolves and
-// spawns the agent (surfacing not_installed early), subscribes before Run so no
-// event is missed, and attaches the runtime session id — all internally.
-func Start(ctx context.Context, agent Agent, opts ...Option) (*Session, error) {
-	cfg := buildConfig(opts)
-	d, err := driverFor(agent)
-	if err != nil {
-		return nil, err
-	}
-	att, err := d.OpenSession(ctx, autoKey(agent), cfg.spec(), driver.OpenParams{ResumeSessionID: cfg.resume})
-	if err != nil {
-		return nil, err // includes not_installed, surfaced before spawn
-	}
-	sub := att.Events.Subscribe()
-	if err := att.Session.Run(ctx, nil); err != nil {
-		_ = att.Session.Close(ctx)
-		return nil, err
-	}
-	return &Session{inner: att.Session, sub: sub}, nil
-}
-
-// Open is kept as a compatibility alias for Start.
-func Open(ctx context.Context, agent Agent, opts ...Option) (*Session, error) {
-	return Start(ctx, agent, opts...)
-}
-
-// SessionID returns the runtime-owned id, usable with WithResume later.
-func (s *Session) SessionID() string { return s.inner.SessionID() }
-
-// Prompt sends a prompt and returns a Stream handle for the turn. Callers can
-// either range it (st.Next()/st.Event()) to watch the turn unfold, or call
-// st.Result() directly to block for the final outcome — one method, both styles,
-// and streaming callers still get the final usage/finish via Result.
-//
-// Prompts on one Session are serial: if a prior turn's Stream has not been
-// drained (via Result() or ranging Next() to completion), Prompt returns a
-// Stream whose Result() yields an error. Open another Session for parallelism.
-func (s *Session) Prompt(ctx context.Context, prompt string) *Stream {
+// Stream sends one prompt and returns its live event stream.
+func (s *Session) Stream(ctx context.Context, prompt string) (*Stream, error) {
 	s.mu.Lock()
-	if s.busy {
+	if s.closedByAgent || s.agent.isClosed() {
 		s.mu.Unlock()
-		st := &Stream{ctx: ctx}
-		st.finish(Result{}, errs.Unsupported("unio: a turn is already in flight on this session; prompts are serial"))
-		return st
+		return nil, errs.InvalidState("agent is closed")
 	}
-	s.busy = true
+	if s.state != Idle {
+		state := s.state
+		s.mu.Unlock()
+		return nil, errs.InvalidState("cannot run session while " + string(state))
+	}
+	s.state = Running
 	s.mu.Unlock()
 
-	runID, err := s.inner.Prompt(ctx, driver.PromptReq{Text: prompt})
-	st := &Stream{
-		sub:    s.sub,
-		runID:  runID,
-		sid:    s.inner.SessionID,
-		ctx:    ctx,
-		onDone: s.clearBusy,
+	if err := s.ensureAttached(ctx); err != nil {
+		s.setState(Idle)
+		return nil, err
 	}
-	if err != nil {
-		// Prompt failed to submit: mark done so Result() yields the error, and
-		// release the session for the next turn.
-		st.finish(Result{}, err)
-	}
-	return st
-}
-
-// clearBusy releases the session so the next turn can start. Called exactly once
-// when a Stream reaches its terminal state.
-func (s *Session) clearBusy() {
 	s.mu.Lock()
-	s.busy = false
+	inner := s.inner
+	events := s.events
+	s.mu.Unlock()
+	runID, err := inner.Prompt(ctx, driver.PromptReq{Text: prompt})
+	if err != nil {
+		s.setState(Idle)
+		return nil, err
+	}
+	stream := newStream(ctx, s, events, runID)
+	s.mu.Lock()
+	s.active = stream
+	s.mu.Unlock()
+	return stream, nil
+}
+
+func (s *Session) ensureAttached(ctx context.Context) error {
+	s.mu.Lock()
+	if s.inner != nil {
+		s.mu.Unlock()
+		return nil
+	}
+	resumeID := s.id
+	s.mu.Unlock()
+
+	att, err := s.agent.driver.OpenSession(ctx, s.key, s.agent.cfg.spec(), driver.OpenParams{ResumeSessionID: resumeID})
+	if err != nil {
+		return err
+	}
+	events := att.Events.Subscribe()
+	if err := att.Session.Run(ctx, nil); err != nil {
+		_ = att.Session.Close(context.Background())
+		return err
+	}
+	s.mu.Lock()
+	s.inner = att.Session
+	s.events = events
+	sid := att.Session.SessionID()
+	if sid != "" {
+		s.id = sid
+	}
+	s.mu.Unlock()
+	if sid != "" {
+		return s.agent.register(s, sid)
+	}
+	return nil
+}
+
+// Interrupt stops the current running or blocked turn. It is an idempotent
+// no-op while idle.
+func (s *Session) Interrupt(ctx context.Context) error {
+	s.mu.Lock()
+	if s.state == Idle {
+		s.mu.Unlock()
+		return nil
+	}
+	inner := s.inner
+	s.mu.Unlock()
+	if inner == nil {
+		return errs.InvalidState("session is not attached")
+	}
+	if err := inner.Interrupt(ctx); err != nil {
+		return err
+	}
+	s.setState(Idle)
+	return nil
+}
+
+// Continue supplies input requested by a blocked turn and waits for the agent
+// to complete, block again, or be interrupted.
+func (s *Session) Continue(ctx context.Context, input string) (Result, error) {
+	s.mu.Lock()
+	if s.state != Blocked {
+		s.mu.Unlock()
+		return Result{}, errs.InvalidState("continue requires a blocked session")
+	}
+	s.state = Running
+	inner := s.inner
+	events := s.events
+	s.mu.Unlock()
+	runID, err := inner.Continue(ctx, input)
+	if err != nil {
+		s.setState(Blocked)
+		return Result{}, err
+	}
+	stream := newStream(ctx, s, events, runID)
+	s.mu.Lock()
+	s.active = stream
+	s.mu.Unlock()
+	return stream.Result()
+}
+
+func (s *Session) setState(state SessionState) {
+	s.mu.Lock()
+	s.state = state
+	if state != Running {
+		s.active = nil
+	}
 	s.mu.Unlock()
 }
 
-// Interrupt interrupts the in-flight turn.
-func (s *Session) Interrupt(ctx context.Context) error {
-	return s.inner.Interrupt(ctx)
-}
-
-// Close shuts the session down and releases the agent process/resources.
-func (s *Session) Close() error {
-	return s.inner.Close(context.Background())
-}
-
-func failedToError(ev driver.AgentEvent) error {
-	if ev.Err != nil {
-		return ev.Err
+func (s *Session) setID(id string) error {
+	if id == "" {
+		return nil
 	}
-	return driver.NewRuntimeReportedError("unio: run failed")
+	s.mu.Lock()
+	s.id = id
+	s.mu.Unlock()
+	return s.agent.register(s, id)
+}
+
+func (s *Session) closeAttachment(ctx context.Context) error {
+	s.mu.Lock()
+	s.closedByAgent = true
+	inner := s.inner
+	s.inner = nil
+	s.events = nil
+	s.mu.Unlock()
+	if inner != nil {
+		return inner.Close(ctx)
+	}
+	return nil
 }

@@ -17,13 +17,22 @@ import (
 func main() {
 	// The whole interaction: one call. unio handles spawn, session id,
 	// subscription, the event loop, and completion.
-	res, err := unio.Run(context.Background(), unio.Claude, "Reply with exactly one word: ping")
+	agent, err := unio.New(unio.Claude)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer agent.Close()
+	session, err := agent.NewSession(context.Background())
+	if err != nil {
+		log.Fatal(err)
+	}
+	res, err := session.Run(context.Background(), "Reply with exactly one word: ping")
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	fmt.Println("answer:", res.Text)
-	fmt.Printf("session: %s (finish=%s)\n", res.SessionID, res.FinishReason)
+	fmt.Printf("session: %s\n", res.SessionID)
 	for model, u := range res.Usage {
 		fmt.Printf("usage[%s]: in=%d out=%d cost=$%.4f\n", model, u.InputTokens, u.OutputTokens, u.CostUSD)
 	}
