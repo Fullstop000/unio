@@ -1,0 +1,35 @@
+README.md
+  s_0b0f8a8fcdf726::t_00c96223b7f1d5 59-60
+SPEC.md
+  s_0b0f8a8fcdf726::t_22c6702bfa7287 104,111-112
+docs/superpowers/specs/2026-07-10-agent-session-api-design.md
+  s_0b0f8a8fcdf726::t_6343d70f26f138 166-167,245-246,255-258
+driver/claude/sessions.go
+  s_0b0f8a8fcdf726::t_827b470d33d5c8 78
+driver/claude/sessions_test.go
+  s_0b0f8a8fcdf726::t_1aae89b7f24c0b 31
+driver/codex/sessions.go
+  s_0b0f8a8fcdf726::t_c0386da17632e9 76
+driver/codex/sessions_test.go
+  s_0b0f8a8fcdf726::t_7a798ed33e0ef9 31
+driver/driver.go
+  s_0b0f8a8fcdf726::t_3dfc033940057f 222
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "7e3f75a52900b1755c1820a1c886f0b03e10704a",
+  "prompts": {},
+  "sessions": {
+    "s_0b0f8a8fcdf726": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4a17-3b3b-76c1-90ac-be1a039189b7",
+        "model": "unknown"
+      },
+      "human_author": "Fullstop000 <fullstop1005@gmail.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
