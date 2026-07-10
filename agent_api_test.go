@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/Fullstop000/unio/driver"
 	"github.com/Fullstop000/unio/driver/fake"
@@ -157,4 +158,59 @@ func TestInterruptReturnsPartialResult(t *testing.T) {
 		t.Fatalf("result=%+v state=%q err=%v", result, session.State(), err)
 	}
 	close(gate)
+}
+
+func TestContextCancellationWaitsForInterruptConfirmation(t *testing.T) {
+	turnGate := make(chan struct{})
+	interruptGate := make(chan struct{})
+	fd := fake.New()
+	agent := newAgentWithDriver(t, fd)
+	session, _ := agent.NewSession(context.Background())
+	fd.ScriptSession(session.key, fake.Script{Wait: turnGate, InterruptWait: interruptGate})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := session.Run(ctx, "long")
+		done <- err
+	}()
+	waitDriverPhase(t, session, driver.PhasePromptInFlight)
+	cancel()
+	time.Sleep(20 * time.Millisecond)
+	if session.State() != Running {
+		t.Fatalf("state changed before interrupt confirmation: %q", session.State())
+	}
+	close(interruptGate)
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("run error = %v; want context.Canceled", err)
+	}
+	if session.State() != Idle {
+		t.Fatalf("state after confirmation = %q", session.State())
+	}
+	close(turnGate)
+}
+
+func waitState(t *testing.T, session *Session, want SessionState) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if session.State() == want {
+			return
+		}
+	}
+	t.Fatalf("state = %q; want %q", session.State(), want)
+}
+
+func waitDriverPhase(t *testing.T, session *Session, want driver.Phase) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		session.mu.Lock()
+		inner := session.inner
+		session.mu.Unlock()
+		if inner != nil && inner.ProcessState().Phase == want {
+			return
+		}
+	}
+	t.Fatalf("driver did not reach phase %q", want)
 }

@@ -134,6 +134,14 @@ func (s *Session) Interrupt(ctx context.Context) error {
 	if err := inner.Interrupt(ctx); err != nil {
 		return err
 	}
+	if inner.ProcessState().Phase == driver.PhaseClosed {
+		s.mu.Lock()
+		if s.inner == inner {
+			s.inner = nil
+			s.events = nil
+		}
+		s.mu.Unlock()
+	}
 	s.setState(Idle)
 	return nil
 }

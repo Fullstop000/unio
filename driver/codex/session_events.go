@@ -28,6 +28,12 @@ func (s *session) onEvent(ev AppServerEvent) {
 	case EvTokenUsage:
 		s.pendingUsage.Store(&ev.Usage)
 
+	case EvCommandApproval:
+		s.setBlocked(ev, driver.BlockedToolApproval, "Command requires approval")
+
+	case EvFileChangeApproval:
+		s.setBlocked(ev, driver.BlockedPermission, "File change requires approval")
+
 	case EvTurnCompleted:
 		s.finishTurn(run, ev)
 	}
@@ -54,6 +60,7 @@ func (s *session) onItemCompleted(run driver.RunID, item Item) {
 
 // finishTurn emits TurnEnd + Completed/Failed with any accumulated usage.
 func (s *session) finishTurn(run driver.RunID, ev AppServerEvent) {
+	defer s.finishTurnDone()
 	threadID := s.SessionID()
 	s.emit(run, driver.AgentEventItem{Kind: driver.ItemTurnEnd})
 

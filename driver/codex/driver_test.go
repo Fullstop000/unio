@@ -22,12 +22,15 @@ type scriptedServer struct {
 	fromDriver  *io.PipeReader // server reads this (driver stdin)
 	fromDriverW *io.PipeWriter
 
-	mu             sync.Mutex
-	threadID       string
-	turnSeq        int
-	omitThreadID   bool
-	omitTurnIDResp bool
-	killed         chan struct{}
+	mu               sync.Mutex
+	threadID         string
+	turnSeq          int
+	omitThreadID     bool
+	omitTurnIDResp   bool
+	requestApproval  bool
+	approvalDecision string
+	activeTurnID     string
+	killed           chan struct{}
 }
 
 func newScriptedServer() *scriptedServer {
@@ -89,6 +92,10 @@ func (s *scriptedServer) loop() {
 			omitThreadID := s.omitThreadID
 			omitTurnIDResp := s.omitTurnIDResp
 			s.mu.Unlock()
+			s.mu.Lock()
+			s.activeTurnID = turnID
+			requestApproval := s.requestApproval
+			s.mu.Unlock()
 			// turn/start response, then a streamed turn.
 			turnResp := map[string]any{}
 			if !omitTurnIDResp {
@@ -106,6 +113,10 @@ func (s *scriptedServer) loop() {
 				doneParams["threadId"] = s.threadID
 			}
 			s.send(map[string]any{"method": "turn/started", "params": startedParams})
+			if requestApproval {
+				s.send(map[string]any{"id": 42, "method": "item/commandExecution/requestApproval", "params": map[string]any{"threadId": s.threadID, "turnId": turnID, "itemId": "cmd-1"}})
+				continue
+			}
 			s.send(map[string]any{"method": "item/agentMessage/delta", "params": deltaParams})
 			s.send(map[string]any{"method": "thread/tokenUsage/updated", "params": usageParams})
 			s.send(map[string]any{"method": "turn/completed", "params": doneParams})
@@ -116,6 +127,16 @@ func (s *scriptedServer) loop() {
 			turnID := "turn-" + string(rune('a'+s.turnSeq-1))
 			s.mu.Unlock()
 			s.send(map[string]any{"method": "turn/completed", "params": map[string]any{"threadId": s.threadID, "turn": map[string]any{"id": turnID, "status": "interrupted"}}})
+		}
+		if method == "" && hasID {
+			if result, ok := m["result"].(string); ok {
+				s.mu.Lock()
+				s.approvalDecision = result
+				turnID := s.activeTurnID
+				s.mu.Unlock()
+				s.send(map[string]any{"method": "item/agentMessage/delta", "params": map[string]any{"threadId": s.threadID, "turnId": turnID, "itemId": "m1", "delta": "continued"}})
+				s.send(map[string]any{"method": "turn/completed", "params": map[string]any{"threadId": s.threadID, "turn": map[string]any{"id": turnID, "status": "completed"}}})
+			}
 		}
 		_ = hasID
 	}
@@ -328,6 +349,47 @@ func TestDriverSharesProcessAcrossSessionKeys(t *testing.T) {
 	}
 	if first.Session.(*session).proc != second.Session.(*session).proc {
 		t.Fatal("one driver instance must share one app-server process")
+	}
+}
+
+func TestCodexApprovalBlocksAndContinues(t *testing.T) {
+	srv := newScriptedServer()
+	srv.mu.Lock()
+	srv.requestApproval = true
+	srv.mu.Unlock()
+	d := newWithTransport(func(context.Context, string, driver.AgentSpec) (stdioTransport, error) {
+		return srv, nil
+	})
+	att, err := d.OpenSession(context.Background(), "approval", driver.AgentSpec{ExecutablePath: fakeCodex(t)}, driver.OpenParams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := att.Events.Subscribe()
+	if err := att.Session.Run(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+	run, err := att.Session.Prompt(context.Background(), driver.PromptReq{Text: "run command"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocked := drainUntil(t, events, func(ev driver.AgentEvent) bool {
+		return ev.Type == driver.EventBlocked && ev.RunID == run
+	}, 3*time.Second)
+	if blocked[len(blocked)-1].Blocked == nil || blocked[len(blocked)-1].Blocked.Kind != driver.BlockedToolApproval {
+		t.Fatalf("unexpected blocked event: %+v", blocked[len(blocked)-1])
+	}
+	continuedRun, err := att.Session.Continue(context.Background(), "allow_once")
+	if err != nil {
+		t.Fatal(err)
+	}
+	drainUntil(t, events, func(ev driver.AgentEvent) bool {
+		return ev.Type == driver.EventCompleted && ev.RunID == continuedRun
+	}, 3*time.Second)
+	srv.mu.Lock()
+	decision := srv.approvalDecision
+	srv.mu.Unlock()
+	if decision != "accept" {
+		t.Fatalf("approval decision = %q; want accept", decision)
 	}
 }
 

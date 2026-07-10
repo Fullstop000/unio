@@ -102,6 +102,7 @@ type handle struct {
 	// duplicate and skipped. Environments that DON'T stream deltas leave it
 	// false, so the complete message is used as the content source instead.
 	streamedThisTurn atomic.Bool
+	interrupted      atomic.Bool
 	// done is closed when the reader loop exits.
 	done chan struct{}
 }
@@ -230,17 +231,37 @@ func (h *handle) Prompt(ctx context.Context, req driver.PromptReq) (driver.RunID
 	return runID, nil
 }
 
-// Interrupt is unsupported for headless Claude until process-kill interruption
-// is implemented.
-// killing the child would end the whole session. Report NotInFlight when idle,
-// Aborted is not truly achievable, so we return NotInFlight to be honest.
+// Interrupt terminates the active headless process. The public session can
+// transparently resume the runtime-owned session id on its next turn.
 func (h *handle) Interrupt(ctx context.Context) error {
-	if p := h.curRun.Load(); p != nil && *p != "" {
-		// A turn is in flight but headless Claude cannot interrupt it without
-		// tearing down the session. We surface Aborted semantics only by
-		// closing the session via Close; here we report the honest state.
-		return driver.NewUnsupportedError("claude headless has no mid-turn interrupt")
+	h.lmu.Lock()
+	if h.lclosed {
+		h.lmu.Unlock()
+		return nil
 	}
+	if p := h.curRun.Load(); p == nil || *p == "" {
+		h.lmu.Unlock()
+		return nil
+	}
+	h.lclosed = true
+	h.interrupted.Store(true)
+	h.mu.Lock()
+	tr := h.tr
+	done := h.done
+	h.mu.Unlock()
+	h.lmu.Unlock()
+	if tr != nil {
+		tr.kill()
+	}
+	if done != nil {
+		select {
+		case <-done:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	h.setState(driver.ProcessState{Phase: driver.PhaseClosed, SessionID: h.SessionID()})
+	h.bus.Close()
 	return nil
 }
 
@@ -297,7 +318,12 @@ func (h *handle) readerLoop() {
 	if p := h.curRun.Load(); p != nil && *p != "" {
 		run := *p
 		h.curRun.Store(ptr(""))
-		h.bus.Emit(driver.CompletedEvent(h.key, h.SessionID(), run, driver.RunResult{FinishReason: driver.FinishTransportClosed}))
+		finish := driver.FinishTransportClosed
+		if h.interrupted.Swap(false) {
+			finish = driver.FinishCancelled
+		}
+		h.bus.Emit(driver.OutputEvent(h.key, h.SessionID(), run, driver.AgentEventItem{Kind: driver.ItemTurnEnd}))
+		h.bus.Emit(driver.CompletedEvent(h.key, h.SessionID(), run, driver.RunResult{FinishReason: finish}))
 	}
 }
 

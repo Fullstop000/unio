@@ -212,6 +212,41 @@ func TestClaudeDriverErrorResult(t *testing.T) {
 	_ = att.Session.Close(context.Background())
 }
 
+func TestClaudeInterruptKillsTurnAsCancelled(t *testing.T) {
+	tr := newScriptedTransport([]string{
+		`{"type":"system","subtype":"init","session_id":"sess-interrupt"}`,
+	})
+	d := newWithTransport(func(context.Context, string, []string, driver.AgentSpec) (transport, error) {
+		return tr, nil
+	})
+	att, err := d.OpenSession(context.Background(), "interrupt", driver.AgentSpec{ExecutablePath: fakeInstalledBinary(t)}, driver.OpenParams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := att.Events.Subscribe()
+	if err := att.Session.Run(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+	run, err := att.Session.Prompt(context.Background(), driver.PromptReq{Text: "long"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	go tr.feed()
+	collect(t, events, func(ev driver.AgentEvent) bool {
+		return ev.Type == driver.EventSessionAttached
+	}, 2*time.Second)
+	if err := att.Session.Interrupt(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	evs := collect(t, events, func(ev driver.AgentEvent) bool {
+		return ev.Type == driver.EventCompleted && ev.RunID == run
+	}, 2*time.Second)
+	last := evs[len(evs)-1]
+	if last.Result.FinishReason != driver.FinishCancelled {
+		t.Fatalf("finish = %q; want cancelled", last.Result.FinishReason)
+	}
+}
+
 func TestClaudeDriverNonStreamingCompleteMessage(t *testing.T) {
 	// Environment that does NOT emit stream_event deltas — the whole turn's
 	// content arrives in one `assistant` message (e.g. a proxy CLI). The driver

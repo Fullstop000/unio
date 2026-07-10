@@ -2,6 +2,7 @@ package codex
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"sync"
@@ -96,6 +97,11 @@ type session struct {
 	// attached to the Completed event when the turn ends.
 	pendingUsage atomic.Pointer[TurnTokenUsage]
 
+	blockMu  sync.Mutex
+	block    *pendingBlock
+	doneMu   sync.Mutex
+	turnDone chan struct{}
+
 	// mu serialises the mutating lifecycle methods (Run/Prompt/Cancel/Close) so
 	// the SDK — not the caller — guarantees a Session is safe for concurrent
 	// use (SPEC §Concurrency). It is held only across brief request/ack windows,
@@ -103,6 +109,11 @@ type session struct {
 	// (SessionID/ProcessState) stay lock-free on atomics.
 	mu     sync.Mutex
 	closed bool
+}
+
+type pendingBlock struct {
+	requestID json.RawMessage
+	reason    driver.BlockedReason
 }
 
 func (s *session) Key() driver.SessionKey { return s.key }
@@ -209,6 +220,9 @@ func (s *session) Prompt(ctx context.Context, req driver.PromptReq) (driver.RunI
 	}
 	runID := driver.NewRunID()
 	s.curRun.Store(&runID)
+	s.doneMu.Lock()
+	s.turnDone = make(chan struct{})
+	s.doneMu.Unlock()
 	s.setState(driver.ProcessState{Phase: driver.PhasePromptInFlight, SessionID: threadID, RunID: runID})
 
 	id := s.proc.allocID()
@@ -239,10 +253,6 @@ func (s *session) Interrupt(ctx context.Context) error {
 	if s.closed {
 		return nil
 	}
-	cur := s.curRun.Load()
-	if cur == nil || *cur == "" {
-		return nil
-	}
 	tp := s.turnID.Load()
 	if tp == nil || *tp == "" {
 		return nil
@@ -252,13 +262,80 @@ func (s *session) Interrupt(ctx context.Context) error {
 	if _, err := waitResp(ctx, ch, s.proc.closed); err != nil {
 		return toAgentErr(err)
 	}
-	// The turn/completed{interrupted} notification will finalise the run.
-	return nil
+	s.doneMu.Lock()
+	done := s.turnDone
+	s.doneMu.Unlock()
+	if done == nil {
+		return nil
+	}
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-s.proc.closed:
+		return driver.NewTransportError("codex app-server closed while interrupting")
+	}
 }
 
-// Continue is implemented with approval routing in the blocked-turn task.
 func (s *session) Continue(ctx context.Context, input string) (driver.RunID, error) {
-	return "", driver.NewUnsupportedError("codex: no blocked turn")
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return "", driver.NewUnsupportedError("codex: session is closed")
+	}
+	s.blockMu.Lock()
+	block := s.block
+	if block == nil {
+		s.blockMu.Unlock()
+		return "", driver.NewInvalidStateError("codex: no blocked turn")
+	}
+	decision, ok := map[string]string{
+		"allow_once": "accept",
+		"deny":       "decline",
+		"cancel":     "cancel",
+	}[input]
+	if !ok {
+		s.blockMu.Unlock()
+		return "", driver.NewInvalidStateError("codex: invalid blocked response")
+	}
+	s.block = nil
+	s.blockMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	runID := driver.NewRunID()
+	s.curRun.Store(&runID)
+	s.setState(driver.ProcessState{Phase: driver.PhasePromptInFlight, SessionID: s.SessionID(), RunID: runID})
+	s.proc.writeLine(BuildApprovalResponse(block.requestID, decision))
+	return runID, nil
+}
+
+func (s *session) setBlocked(ev AppServerEvent, kind driver.BlockedKind, message string) {
+	run := s.currentRun()
+	reason := driver.BlockedReason{
+		Kind: kind, Message: message,
+		Options: []driver.BlockOption{
+			{Value: "allow_once", Label: "Allow once"},
+			{Value: "deny", Label: "Deny"},
+		},
+	}
+	s.blockMu.Lock()
+	s.block = &pendingBlock{requestID: append(json.RawMessage(nil), ev.RequestID...), reason: reason}
+	s.blockMu.Unlock()
+	s.bus.Emit(driver.BlockedEvent(s.key, s.SessionID(), run, reason))
+	s.curRun.Store(ptr(""))
+	s.setState(driver.ProcessState{Phase: driver.PhaseBlocked, SessionID: s.SessionID(), RunID: run})
+}
+
+func (s *session) finishTurnDone() {
+	s.doneMu.Lock()
+	done := s.turnDone
+	s.turnDone = nil
+	s.doneMu.Unlock()
+	if done != nil {
+		close(done)
+	}
 }
 
 // Close unregisters the session (tearing down the shared child only when this
