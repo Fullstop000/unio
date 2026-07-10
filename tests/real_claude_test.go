@@ -13,6 +13,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Fullstop000/unio"
 )
@@ -76,8 +77,75 @@ func TestReal_Claude_Stream(t *testing.T) {
 	t.Logf("streamed: %q", text.String())
 }
 
+// Real Claude interruption proves the process-per-turn transport is stopped,
+// its runtime session ID survives, and a new Agent can recover that session.
+func TestReal_Claude_InterruptAndRecover(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	agent, err := unio.New(unio.Claude)
+	if err != nil {
+		t.Skip("claude CLI not installed; skipping real E2E")
+	}
+	defer agent.Close()
+	session, err := agent.NewSession(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream, err := session.Stream(ctx, "Write the integers from 1 through 5000, separated by spaces.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Next consumes SessionAttached internally before returning the first output,
+	// ensuring the facade has captured the runtime ID before we kill the child.
+	if !stream.Next() {
+		_, resultErr := stream.Result()
+		skipClaudeEnvError(t, resultErr)
+		t.Fatalf("long turn ended before interruption: %v", resultErr)
+	}
+	if err := session.Interrupt(ctx); err != nil {
+		t.Fatal(err)
+	}
+	interrupted, err := stream.Result()
+	if err != nil {
+		skipClaudeEnvError(t, err)
+		t.Fatalf("interrupted result: %v", err)
+	}
+	if !interrupted.Interrupted {
+		t.Fatal("expected the real Claude turn to report interruption")
+	}
+	id := session.ID()
+	if id == "" {
+		t.Fatal("interrupted Claude session lost its runtime ID")
+	}
+	if err := agent.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	recoveringAgent, err := unio.New(unio.Claude)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer recoveringAgent.Close()
+	recovered, err := recoveringAgent.GetSession(ctx, id)
+	if err != nil {
+		t.Fatalf("GetSession(%q): %v", id, err)
+	}
+	result, err := recovered.Run(ctx, "Reply with exactly one word: recovered")
+	if err != nil {
+		skipClaudeEnvError(t, err)
+		t.Fatalf("run recovered session: %v", err)
+	}
+	if !strings.Contains(strings.ToLower(result.Text), "recovered") {
+		t.Fatalf("unexpected recovered reply: %q", result.Text)
+	}
+	t.Logf("recovered Claude session %s", id)
+}
+
 func skipClaudeEnvError(t *testing.T, err error) {
 	t.Helper()
+	if err == nil {
+		return
+	}
 	msg := err.Error()
 	for _, needle := range []string{
 		"does not have a valid CodingPlan subscription",
