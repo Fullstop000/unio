@@ -1,11 +1,6 @@
 # unio
 
-Go SDK for driving coding-agent CLIs with one API.
-
-Supported:
-
-- Claude Code
-- Codex
+Go SDK for using Claude Code and Codex through one human-aligned API.
 
 ## Install
 
@@ -13,81 +8,98 @@ Supported:
 go get github.com/Fullstop000/unio
 ```
 
-The target CLI must be installed and logged in.
+The selected CLI must be installed and authenticated.
 
-Current stability: Go API v0.1.0. `Start`, `Run`, `Session`, `Stream`,
-`Result`, and typed errors are intended as the public surface.
-
-## Usage
+## Run a task
 
 ```go
-res, err := unio.Run(ctx, unio.Claude, "Reply with exactly one word: ping")
+agent, err := unio.New(unio.Codex, unio.WithCwd("/path/to/repo"))
+if err != nil {
+    return err
+}
+defer agent.Close()
+
+session, err := agent.NewSession(ctx)
 if err != nil {
     return err
 }
 
-fmt.Println(res.Text)
-fmt.Println(res.SessionID)
-fmt.Println(res.Usage)
+result, err := session.Run(ctx, "Explain this repository")
+fmt.Println(result.Text)
 ```
 
+A new session has no runtime ID before its first turn:
+
 ```go
-s, err := unio.Start(ctx, unio.Codex, unio.WithCwd("/path/to/repo"))
+session.ID() // ""
+_, _ = session.Run(ctx, "Start a plan")
+session.ID() // Claude/Codex runtime session ID
+```
+
+## Stream and interrupt
+
+```go
+stream, err := session.Stream(ctx, "Refactor the authentication module")
 if err != nil {
     return err
 }
-defer s.Close()
 
-st := s.Prompt(ctx, "Explain this repository")
-for st.Next() {
-    ev := st.Event()
-    if ev.Kind == unio.KindText {
-        fmt.Print(ev.Text)
+for stream.Next() {
+    event := stream.Event()
+    if event.Kind == unio.KindText {
+        fmt.Print(event.Text)
     }
 }
 
-res, err := st.Result()
+result, err := stream.Result()
 ```
 
-Prompts on the same `Session` are serial. Open multiple sessions for parallel
-runs.
+Call `session.Interrupt(ctx)` from another goroutine to stop a running turn.
+Interrupt is normal control flow; the waiting result has `Interrupted == true`.
+When using `Stream`, drain `stream.Result()` before starting the next turn so
+the interrupted turn's terminal event is finalized.
 
-Resume uses the runtime session id:
+## Blocked turns
+
+An agent can pause for user input, tool approval, permission, authentication,
+or another external action:
 
 ```go
-res, _ := unio.Run(ctx, unio.Claude, "Start a plan")
-s, err := unio.Start(ctx, unio.Claude, unio.WithResume(res.SessionID))
+result, err := session.Run(ctx, "Run the tests and fix failures")
+if err != nil {
+    return err
+}
+if result.Blocked != nil {
+    fmt.Println(result.Blocked.Message)
+    result, err = session.Continue(ctx, "allow_once")
+}
 ```
 
-## API
+`BlockedReason.Options` is best-effort and may be empty. When present, pass an
+option's `Value` to `Continue`; otherwise pass free-form input.
+
+## Find and continue a session
 
 ```go
-unio.Run(ctx, agent, prompt, opts...) (unio.Result, error)
-unio.Start(ctx, agent, opts...) (*unio.Session, error)
-unio.Installed(agent) bool
+sessions, err := agent.ListSessions(ctx)
+session, err := agent.GetSession(ctx, sessions[0].ID)
 
-session.Prompt(ctx, prompt) *unio.Stream
-session.Cancel(ctx) (bool, error)
-session.Close() error
-
-stream.Next() bool
-stream.Event() unio.Event
-stream.Result() (unio.Result, error)
+// Runtime resume is automatic.
+result, err := session.Run(ctx, "Continue the previous work")
 ```
 
-`Result` includes text, thinking, tool calls, session id, finish reason, and
-token usage.
+`Session.State()` exposes only `Idle`, `Running`, and `Blocked`. Runtime process
+and transport lifecycle remain internal.
 
 ## Test
 
 ```sh
+go vet ./...
 go test -race ./...
 go test -tags e2e_real ./tests/...
 ```
 
-Real E2E tests require installed, authenticated CLIs.
-
-Examples: `examples/basic`, `examples/multi`, `examples/sessions`.
+Real E2E tests invoke authenticated CLIs and may consume tokens.
 
 ## License
 

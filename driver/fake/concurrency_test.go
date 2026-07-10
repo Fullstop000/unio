@@ -36,7 +36,7 @@ func TestConcurrentSessionUseIsSafe(t *testing.T) {
 			defer wg.Done()
 			for j := 0; j < 50; j++ {
 				_, _ = att.Session.Prompt(context.Background(), driver.PromptReq{Text: "x"})
-				_, _ = att.Session.Cancel(context.Background(), "r")
+				_ = att.Session.Interrupt(context.Background())
 				_ = att.Session.ProcessState()
 				_ = att.Session.SessionID()
 			}

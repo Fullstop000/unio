@@ -20,6 +20,7 @@ import (
 type stdioTransport interface {
 	stdin() io.Writer
 	stdout() *bufio.Scanner
+	wait() error
 	kill()
 	errText() string
 }
@@ -37,6 +38,7 @@ type procTransport struct {
 
 func (p *procTransport) stdin() io.Writer       { return p.in }
 func (p *procTransport) stdout() *bufio.Scanner { return p.sc }
+func (p *procTransport) wait() error            { return p.cmd.Wait() }
 func (p *procTransport) kill() {
 	if p.cmd.Process != nil {
 		_ = p.cmd.Process.Kill()
@@ -103,10 +105,12 @@ type process struct {
 	startErr  error
 	started   atomic.Bool
 	dead      atomic.Bool
+	lifecycle sync.Mutex
 
-	mu     sync.Mutex
-	tr     stdioTransport
-	nextID uint64
+	mu      sync.Mutex
+	writeMu sync.Mutex
+	tr      stdioTransport
+	nextID  uint64
 	// pendingReqs maps request id → waiter; the reader routes responses here.
 	pendingReqs map[uint64]*pending
 	// sessions maps threadId → the live session handle, so notifications route
@@ -115,6 +119,9 @@ type process struct {
 	sessions map[string]*session
 	// turnToThread maps turnId → threadId (some events carry only turnId).
 	turnToThread map[string]string
+	// attachments includes sessions without a runtime thread ID, so process
+	// death invalidates every facade attachment, not only registered threads.
+	attachments map[*session]struct{}
 
 	closed chan struct{}
 }
@@ -134,6 +141,7 @@ func newProcess(execPath string, spec driver.AgentSpec, factory transportFactory
 		pendingReqs:  make(map[uint64]*pending),
 		sessions:     make(map[string]*session),
 		turnToThread: make(map[string]string),
+		attachments:  make(map[*session]struct{}),
 		closed:       make(chan struct{}),
 	}
 }
@@ -142,10 +150,10 @@ func newProcess(execPath string, spec driver.AgentSpec, factory transportFactory
 // once. Concurrent callers block until the first finishes.
 func (p *process) ensureStarted(ctx context.Context) error {
 	p.startOnce.Do(func() {
-		tr, err := p.factory(ctx, p.execPath, p.spec)
+		tr, err := p.factory(context.WithoutCancel(ctx), p.execPath, p.spec)
 		if err != nil {
 			p.startErr = err
-			p.dead.Store(true)
+			p.shutdown()
 			return
 		}
 		p.mu.Lock()
@@ -155,24 +163,32 @@ func (p *process) ensureStarted(ctx context.Context) error {
 		go p.readerLoop()
 
 		// initialize (id 0) → wait for response → send initialized.
-		respCh := p.registerAndSend(0, "initialize", BuildInitialize(0, p.version))
+		respCh, err := p.registerAndSend(0, "initialize", BuildInitialize(0, p.version))
+		if err != nil {
+			p.startErr = err
+			p.shutdown()
+			return
+		}
 		select {
 		case ev := <-respCh:
 			if ev.Type == EvError {
 				p.startErr = driver.NewProtocolError("codex initialize failed: " + ev.ErrMsg)
-				p.dead.Store(true)
+				p.shutdown()
 				return
 			}
 		case <-ctx.Done():
-			p.startErr = driver.NewTimeoutError("codex initialize timed out")
-			p.dead.Store(true)
+			p.startErr = ctx.Err()
+			p.shutdown()
 			return
 		case <-p.closed:
 			p.startErr = driver.NewTransportError(p.closedMessage("codex app-server closed during initialize"))
-			p.dead.Store(true)
 			return
 		}
-		p.writeLine(BuildInitialized())
+		if err := p.writeLine(BuildInitialized()); err != nil {
+			p.startErr = err
+			p.shutdown()
+			return
+		}
 		p.started.Store(true)
 	})
 	return p.startErr
@@ -189,23 +205,39 @@ func (p *process) allocID() uint64 {
 // registerAndSend records a pending waiter for id+method, then writes the line.
 // The waiter MUST be registered before the write so a fast response can't race
 // ahead of the map insert.
-func (p *process) registerAndSend(id uint64, method, line string) chan AppServerEvent {
+func (p *process) registerAndSend(id uint64, method, line string) (chan AppServerEvent, error) {
 	ch := make(chan AppServerEvent, 1)
 	p.mu.Lock()
 	p.pendingReqs[id] = &pending{method: method, ch: ch}
 	p.mu.Unlock()
-	p.writeLine(line)
-	return ch
+	if err := p.writeLine(line); err != nil {
+		p.mu.Lock()
+		delete(p.pendingReqs, id)
+		p.mu.Unlock()
+		p.shutdown()
+		return ch, err
+	}
+	return ch, nil
 }
 
-func (p *process) writeLine(line string) {
+func (p *process) writeLine(line string) error {
+	p.writeMu.Lock()
+	defer p.writeMu.Unlock()
 	p.mu.Lock()
 	tr := p.tr
 	p.mu.Unlock()
 	if tr == nil {
-		return
+		return driver.NewTransportError("codex app-server is not running")
 	}
-	_, _ = tr.stdin().Write([]byte(line + "\n"))
+	payload := []byte(line + "\n")
+	n, err := tr.stdin().Write(payload)
+	if err != nil {
+		return driver.NewTransportError("codex: write stdin: " + err.Error())
+	}
+	if n != len(payload) {
+		return driver.NewTransportError("codex: short write to stdin")
+	}
+	return nil
 }
 
 // registerSession/unregisterSession maintain the threadId → session map.
@@ -218,11 +250,45 @@ func (p *process) registerSession(threadID string, s *session) {
 func (p *process) unregisterSession(threadID string) {
 	p.mu.Lock()
 	delete(p.sessions, threadID)
-	empty := len(p.sessions) == 0
 	p.mu.Unlock()
-	if empty {
-		p.shutdown()
+}
+
+func (p *process) acquire(s *session) bool {
+	p.lifecycle.Lock()
+	defer p.lifecycle.Unlock()
+	if p.dead.Load() {
+		return false
 	}
+	p.attachments[s] = struct{}{}
+	return true
+}
+
+// release drops one attachment lease. It shuts down the child when the last
+// attachment goes away and reports whether the caller must await p.closed.
+func (p *process) release(s *session) bool {
+	p.lifecycle.Lock()
+	delete(p.attachments, s)
+	last := len(p.attachments) == 0
+	shouldKill := last && !p.dead.Swap(true)
+	p.lifecycle.Unlock()
+
+	p.mu.Lock()
+	hasTransport := p.tr != nil
+	p.mu.Unlock()
+	if shouldKill && hasTransport {
+		p.killTransport()
+	}
+	return last && hasTransport
+}
+
+func (p *process) attachedSessions() []*session {
+	p.lifecycle.Lock()
+	defer p.lifecycle.Unlock()
+	out := make([]*session, 0, len(p.attachments))
+	for s := range p.attachments {
+		out = append(out, s)
+	}
+	return out
 }
 
 func (p *process) sessionForThread(threadID string) *session {
@@ -311,9 +377,16 @@ func (b *boundedBuffer) String() string {
 
 // shutdown kills the child and marks the process stale.
 func (p *process) shutdown() {
+	p.lifecycle.Lock()
 	if p.dead.Swap(true) {
+		p.lifecycle.Unlock()
 		return
 	}
+	p.lifecycle.Unlock()
+	p.killTransport()
+}
+
+func (p *process) killTransport() {
 	p.mu.Lock()
 	tr := p.tr
 	p.mu.Unlock()

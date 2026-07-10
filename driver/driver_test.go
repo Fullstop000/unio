@@ -57,22 +57,46 @@ func TestEventBusSlowObserverDoesNotStallFast(t *testing.T) {
 	total := observerCapacity + 20
 	for i := 0; i < total; i++ {
 		bus.Emit(LifecycleEvent(key, ProcessState{Phase: PhaseActive}))
-	}
-
-	got := 0
-	for got < total {
-		select {
-		case _, ok := <-fast:
-			if !ok {
-				t.Fatalf("fast observer closed early at %d/%d", got, total)
-			}
-			got++
-		case <-time.After(time.Second):
-			t.Fatalf("fast observer stalled at %d/%d (slow peer should not block it)", got, total)
+		if _, ok := drainOne(t, fast, time.Second); !ok {
+			t.Fatalf("fast observer closed early at %d/%d", i, total)
 		}
 	}
 	if bus.Dropped() == 0 {
 		t.Fatal("expected the slow observer to have dropped events")
+	}
+}
+
+func TestEventBusPreservesTerminalEventForFullObserver(t *testing.T) {
+	bus := NewEventBus()
+	ch := bus.Subscribe()
+	for i := 0; i < observerCapacity+1; i++ {
+		bus.Emit(OutputEvent("key", "sid", "run", AgentEventItem{Kind: ItemText, Text: "x"}))
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for bus.Dropped() == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if bus.Dropped() == 0 {
+		t.Fatal("observer did not become full")
+	}
+	beforeTerminal := bus.Dropped()
+	bus.Emit(CompletedEvent("key", "sid", "run", RunResult{FinishReason: FinishNatural}))
+	deadline = time.Now().Add(2 * time.Second)
+	for bus.Dropped() == beforeTerminal && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+
+	timer := time.NewTimer(2 * time.Second)
+	defer timer.Stop()
+	for {
+		select {
+		case ev := <-ch:
+			if ev.Type == EventCompleted {
+				return
+			}
+		case <-timer.C:
+			t.Fatal("completed event was dropped for a full observer")
+		}
 	}
 }
 
@@ -194,5 +218,17 @@ func TestTokenUsageAdd(t *testing.T) {
 	}
 	if u.CostUSD < 0.0299 || u.CostUSD > 0.0301 {
 		t.Fatalf("unexpected cost accumulation: %v", u.CostUSD)
+	}
+}
+
+func TestBlockedEventCarriesReason(t *testing.T) {
+	reason := BlockedReason{
+		Kind:    BlockedToolApproval,
+		Message: "Allow go test?",
+		Options: []BlockOption{{Value: "allow_once", Label: "Allow once"}},
+	}
+	ev := BlockedEvent("key", "sid", "run", reason)
+	if ev.Type != EventBlocked || ev.Blocked == nil || ev.Blocked.Kind != BlockedToolApproval {
+		t.Fatalf("unexpected blocked event: %+v", ev)
 	}
 }

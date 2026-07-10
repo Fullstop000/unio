@@ -150,7 +150,7 @@ func assertProducedOutputAndCompleted(t *testing.T, name string, evs []driver.Ag
 	}
 }
 
-// CancelScenario exercises open → run → prompt → cancel semantics against h.
+// CancelScenario exercises idle interrupt semantics against h.
 func CancelScenario(t *testing.T, h Harness) {
 	if h.Timeout == 0 {
 		h.Timeout = 10 * time.Second
@@ -169,12 +169,7 @@ func CancelScenario(t *testing.T, h Harness) {
 	}
 	defer att.Session.Close(ctx)
 
-	// With no run in flight, Cancel must report NotInFlight.
-	out, err := att.Session.Cancel(ctx, "no-such-run")
-	if err != nil {
-		t.Fatalf("[%s] cancel(idle): %v", h.Name, err)
-	}
-	if out != driver.CancelNotInFlight {
-		t.Fatalf("[%s] cancel with no run in flight should be NotInFlight, got %s", h.Name, out)
+	if err := att.Session.Interrupt(ctx); err != nil {
+		t.Fatalf("[%s] interrupt(idle): %v", h.Name, err)
 	}
 }

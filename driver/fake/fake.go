@@ -21,6 +21,10 @@ type Script struct {
 	Items    []driver.AgentEventItem
 	Result   driver.RunResult
 	FailWith *driver.AgentError
+	Blocked  *driver.BlockedReason
+	Wait     <-chan struct{}
+	// InterruptWait delays interrupt confirmation for state-ordering tests.
+	InterruptWait <-chan struct{}
 }
 
 // Driver is an in-memory ProtocolDriver. It mints monotonic session ids and
@@ -101,7 +105,6 @@ func (d *Driver) ListSessions(ctx context.Context) ([]driver.StoredSessionMeta, 
 func (d *Driver) OpenSession(ctx context.Context, key driver.SessionKey, spec driver.AgentSpec, params driver.OpenParams) (*driver.SessionAttachment, error) {
 	d.mu.Lock()
 	require := d.requireInstall
-	scripts := d.scripts[key]
 	d.mu.Unlock()
 
 	// Real drivers always do this at OpenSession; the fake does it only when
@@ -114,14 +117,23 @@ func (d *Driver) OpenSession(ctx context.Context, key driver.SessionKey, spec dr
 
 	bus := driver.NewEventBus()
 	s := &session{
-		driver:  d,
-		key:     key,
-		bus:     bus,
-		scripts: scripts,
-		resume:  params.ResumeSessionID,
+		driver: d,
+		key:    key,
+		bus:    bus,
+		resume: params.ResumeSessionID,
 	}
 	s.state.Store(&driver.ProcessState{Phase: driver.PhaseIdle})
 	return &driver.SessionAttachment{Session: s, Events: bus}, nil
+}
+
+func (d *Driver) script(key driver.SessionKey, index int) (Script, bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	scripts := d.scripts[key]
+	if index >= len(scripts) {
+		return Script{}, false
+	}
+	return scripts[index], true
 }
 
 func (d *Driver) nextSessionID() driver.SessionID {
@@ -137,11 +149,19 @@ type session struct {
 
 	mu        sync.Mutex
 	sessionID driver.SessionID
-	scripts   []Script
 	scriptIdx int
 	closed    bool
+	active    *turn
+	blocked   *driver.BlockedReason
 
 	state atomic.Pointer[driver.ProcessState]
+}
+
+type turn struct {
+	runID       driver.RunID
+	script      Script
+	stop        chan struct{}
+	interrupted bool
 }
 
 func (s *session) Key() driver.SessionKey { return s.key }
@@ -195,73 +215,150 @@ func (s *session) Run(ctx context.Context, initPrompt *driver.PromptReq) error {
 // Prompt replays the next scripted response (or a trivial echo when unscripted).
 func (s *session) Prompt(ctx context.Context, req driver.PromptReq) (driver.RunID, error) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.closed {
-		s.mu.Unlock()
 		return "", driver.NewUnsupportedError("fake: session is closed")
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
 	}
 	sid := s.sessionID
 	if sid == "" {
-		s.mu.Unlock()
 		return "", driver.NewProtocolError("fake: Prompt before Run")
 	}
-	var script Script
-	scripted := false
-	if s.scriptIdx < len(s.scripts) {
-		script = s.scripts[s.scriptIdx]
-		s.scriptIdx++
-		scripted = true
+	if s.active != nil || s.blocked != nil {
+		return "", driver.NewInvalidStateError("fake: session is not idle")
 	}
-	s.mu.Unlock()
-
-	runID := driver.NewRunID()
-	s.setState(driver.ProcessState{Phase: driver.PhasePromptInFlight, SessionID: sid, RunID: runID})
-
+	script, scripted := s.nextScriptLocked()
 	if !scripted {
-		// Default behaviour: echo the prompt text back as one text item.
 		script = Script{
-			Items: []driver.AgentEventItem{
-				{Kind: driver.ItemText, Text: "echo: " + req.Text},
-			},
+			Items:  []driver.AgentEventItem{{Kind: driver.ItemText, Text: "echo: " + req.Text}},
 			Result: driver.RunResult{FinishReason: driver.FinishNatural},
 		}
 	}
-
-	for _, item := range script.Items {
-		select {
-		case <-ctx.Done():
-			s.setState(driver.ProcessState{Phase: driver.PhaseActive, SessionID: sid})
-			return runID, ctx.Err()
-		default:
-		}
-		s.bus.Emit(driver.OutputEvent(s.key, sid, runID, item))
-	}
-	// Always cap the stream with a turn-end item.
-	s.bus.Emit(driver.OutputEvent(s.key, sid, runID, driver.AgentEventItem{Kind: driver.ItemTurnEnd}))
-
-	if script.FailWith != nil {
-		s.bus.Emit(driver.FailedEvent(s.key, sid, runID, script.FailWith))
-		s.setState(driver.ProcessState{Phase: driver.PhaseActive, SessionID: sid})
-		return runID, nil
-	}
-
-	result := script.Result
-	if result.FinishReason == "" {
-		result.FinishReason = driver.FinishNatural
-	}
-	s.bus.Emit(driver.CompletedEvent(s.key, sid, runID, result))
-	s.setState(driver.ProcessState{Phase: driver.PhaseActive, SessionID: sid})
-	return runID, nil
+	return s.startScriptLocked(script), nil
 }
 
-// Cancel reports NotInFlight unless a run is currently in flight, in which case
-// it flips back to Active and reports Aborted.
-func (s *session) Cancel(ctx context.Context, run driver.RunID) (driver.CancelOutcome, error) {
-	st := s.ProcessState()
-	if st.Phase != driver.PhasePromptInFlight {
-		return driver.CancelNotInFlight, nil
+func (s *session) nextScriptLocked() (Script, bool) {
+	script, ok := s.driver.script(s.key, s.scriptIdx)
+	if ok {
+		s.scriptIdx++
 	}
-	s.setState(driver.ProcessState{Phase: driver.PhaseActive, SessionID: st.SessionID})
-	return driver.CancelAborted, nil
+	return script, ok
+}
+
+func (s *session) startScriptLocked(script Script) driver.RunID {
+	runID := driver.NewRunID()
+	t := &turn{runID: runID, script: script, stop: make(chan struct{})}
+	s.active = t
+	s.setState(driver.ProcessState{Phase: driver.PhasePromptInFlight, SessionID: s.sessionID, RunID: runID})
+	go s.execute(t)
+	return runID
+}
+
+func (s *session) execute(t *turn) {
+	if t.script.Wait != nil {
+		select {
+		case <-t.script.Wait:
+		case <-t.stop:
+			return
+		}
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed || s.active != t || t.interrupted {
+		return
+	}
+	for _, item := range t.script.Items {
+		s.bus.Emit(driver.OutputEvent(s.key, s.sessionID, t.runID, item))
+	}
+	if t.script.Blocked != nil {
+		reason := *t.script.Blocked
+		s.active = nil
+		s.blocked = &reason
+		s.bus.Emit(driver.BlockedEvent(s.key, s.sessionID, t.runID, reason))
+		s.setState(driver.ProcessState{Phase: driver.PhaseBlocked, SessionID: s.sessionID, RunID: t.runID})
+		return
+	}
+	s.bus.Emit(driver.OutputEvent(s.key, s.sessionID, t.runID, driver.AgentEventItem{Kind: driver.ItemTurnEnd}))
+	if t.script.FailWith != nil {
+		s.bus.Emit(driver.FailedEvent(s.key, s.sessionID, t.runID, t.script.FailWith))
+	} else {
+		result := t.script.Result
+		if result.FinishReason == "" {
+			result.FinishReason = driver.FinishNatural
+		}
+		s.bus.Emit(driver.CompletedEvent(s.key, s.sessionID, t.runID, result))
+	}
+	s.active = nil
+	s.setState(driver.ProcessState{Phase: driver.PhaseActive, SessionID: s.sessionID})
+}
+
+func (s *session) Continue(ctx context.Context, input string) (driver.RunID, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return "", driver.NewUnsupportedError("fake: session is closed")
+	}
+	if s.blocked == nil {
+		return "", driver.NewInvalidStateError("fake: no blocked turn")
+	}
+	if len(s.blocked.Options) > 0 {
+		valid := false
+		for _, option := range s.blocked.Options {
+			if option.Value == input {
+				valid = true
+				break
+			}
+		}
+		if !valid {
+			return "", driver.NewInvalidStateError("fake: invalid blocked response")
+		}
+	}
+	s.blocked = nil
+	script, scripted := s.nextScriptLocked()
+	if !scripted {
+		script = Script{Items: []driver.AgentEventItem{{Kind: driver.ItemText, Text: "echo: " + input}}}
+	}
+	return s.startScriptLocked(script), nil
+}
+
+// Interrupt is an idempotent no-op unless a run is currently in flight.
+func (s *session) Interrupt(ctx context.Context) error {
+	s.mu.Lock()
+	if s.blocked != nil {
+		s.blocked = nil
+		s.setState(driver.ProcessState{Phase: driver.PhaseActive, SessionID: s.sessionID})
+		s.mu.Unlock()
+		return nil
+	}
+	t := s.active
+	if t == nil {
+		s.mu.Unlock()
+		return nil
+	}
+	wait := t.script.InterruptWait
+	s.mu.Unlock()
+	if wait != nil {
+		select {
+		case <-wait:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.active != t {
+		return nil
+	}
+	t.interrupted = true
+	close(t.stop)
+	s.active = nil
+	s.bus.Emit(driver.OutputEvent(s.key, s.sessionID, t.runID, driver.AgentEventItem{Kind: driver.ItemTurnEnd}))
+	s.bus.Emit(driver.CompletedEvent(s.key, s.sessionID, t.runID, driver.RunResult{FinishReason: driver.FinishCancelled}))
+	s.setState(driver.ProcessState{Phase: driver.PhaseActive, SessionID: s.sessionID})
+	return nil
 }
 
 // Close moves to PhaseClosed and closes the event bus. Idempotent.

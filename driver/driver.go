@@ -64,6 +64,8 @@ const (
 	PhaseActive Phase = "active"
 	// PhasePromptInFlight: a prompt is currently executing on the live session.
 	PhasePromptInFlight Phase = "prompt_in_flight"
+	// PhaseBlocked: a prompt is paused awaiting external intervention.
+	PhaseBlocked Phase = "blocked"
 	// PhaseClosed: the handle has been closed and cannot be reused.
 	PhaseClosed Phase = "closed"
 	// PhaseFailed: the handle is in a non-recoverable error state.
@@ -99,6 +101,8 @@ const (
 	ErrRuntimeReported = errs.KindRuntimeReported
 	ErrUnsupported     = errs.KindUnsupported
 	ErrNotInstalled    = errs.KindNotInstalled
+	ErrInvalidState    = errs.KindInvalidState
+	ErrSessionNotFound = errs.KindSessionNotFound
 )
 
 // Error constructors re-exported from errs, keeping the driver-local names
@@ -115,8 +119,34 @@ var (
 	// NewUnsupportedError builds an unsupported-operation AgentError.
 	NewUnsupportedError = errs.Unsupported
 	// NewNotInstalledError builds a not-installed AgentError naming the command.
-	NewNotInstalledError = errs.NotInstalledCmd
+	NewNotInstalledError    = errs.NotInstalledCmd
+	NewInvalidStateError    = errs.InvalidState
+	NewSessionNotFoundError = errs.SessionNotFound
 )
+
+// BlockedKind identifies why a running agent needs external intervention.
+type BlockedKind string
+
+const (
+	BlockedUserInput      BlockedKind = "user_input"
+	BlockedToolApproval   BlockedKind = "tool_approval"
+	BlockedPermission     BlockedKind = "permission"
+	BlockedAuthentication BlockedKind = "authentication"
+	BlockedExternal       BlockedKind = "external"
+)
+
+// BlockOption is one best-effort response advertised by a blocked runtime.
+type BlockOption struct {
+	Value string
+	Label string
+}
+
+// BlockedReason describes the external input a running turn needs.
+type BlockedReason struct {
+	Kind    BlockedKind
+	Message string
+	Options []BlockOption
+}
 
 // FinishReason is why a run ended.
 type FinishReason string
@@ -164,16 +194,6 @@ type RunResult struct {
 	DurationMs   int64
 }
 
-// CancelOutcome is the result of a Session.Cancel call.
-type CancelOutcome string
-
-const (
-	// CancelAborted: the in-flight run was aborted; the session remains usable.
-	CancelAborted CancelOutcome = "aborted"
-	// CancelNotInFlight: no run was in flight when Cancel was invoked.
-	CancelNotInFlight CancelOutcome = "not_in_flight"
-)
-
 // ProbeAuth is the authentication state discovered by probing a runtime.
 type ProbeAuth string
 
@@ -199,6 +219,7 @@ type StoredSessionMeta struct {
 	SessionID    SessionID
 	Title        string
 	StartedAt    time.Time
+	UpdatedAt    time.Time
 	MessageCount int
 	Cwd          string
 }
@@ -309,8 +330,13 @@ type Session interface {
 	// so callers can correlate the subsequent Output/Completed events.
 	Prompt(ctx context.Context, req PromptReq) (RunID, error)
 
-	// Cancel cancels an in-flight run. See CancelOutcome for semantics.
-	Cancel(ctx context.Context, run RunID) (CancelOutcome, error)
+	// Continue supplies external input to a blocked run and returns the new SDK
+	// run id used to correlate events after the pause.
+	Continue(ctx context.Context, input string) (RunID, error)
+
+	// Interrupt stops the active or blocked turn. It is an idempotent no-op when
+	// no turn is active.
+	Interrupt(ctx context.Context) error
 
 	// Close shuts this session down and releases its resources. It does not
 	// tear down a shared runtime process while sibling sessions remain live.

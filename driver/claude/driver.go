@@ -41,10 +41,8 @@ func (d *Driver) Probe(ctx context.Context) (driver.RuntimeProbe, error) {
 	return driver.RuntimeProbe{Auth: driver.AuthAuthed, Transport: driver.TransportClaudeStreamJSON}, nil
 }
 
-// ListSessions is not implemented for Claude yet (would scan
-// ~/.claude/projects). Returns empty rather than erroring.
 func (d *Driver) ListSessions(ctx context.Context) ([]driver.StoredSessionMeta, error) {
-	return nil, nil
+	return listStoredSessions(ctx)
 }
 
 // OpenSession resolves the executable (surfacing not_installed early) and builds
@@ -56,6 +54,9 @@ func (d *Driver) OpenSession(ctx context.Context, key driver.SessionKey, spec dr
 	execPath, aerr := driver.ResolveExecutable(spec)
 	if aerr != nil {
 		return nil, aerr
+	}
+	if params.ResumeSessionID != "" && !claudeSessionAlive(spec.Cwd, params.ResumeSessionID) {
+		return nil, driver.NewSessionNotFoundError(params.ResumeSessionID)
 	}
 
 	bus := driver.NewEventBus()
@@ -102,6 +103,7 @@ type handle struct {
 	// duplicate and skipped. Environments that DON'T stream deltas leave it
 	// false, so the complete message is used as the content source instead.
 	streamedThisTurn atomic.Bool
+	interrupted      atomic.Bool
 	// done is closed when the reader loop exits.
 	done chan struct{}
 }
@@ -131,9 +133,8 @@ func (h *handle) setSessionID(sid string) {
 	h.sessionID.Store(&sid)
 }
 
-// buildArgs assembles the claude headless argv. --resume is added only when the
-// on-disk transcript for the prior session exists (liveness guard), else we
-// start fresh.
+// buildArgs assembles the claude headless argv. OpenSession validates explicit
+// resume IDs; once accepted they are never silently downgraded to a fresh turn.
 func (h *handle) buildArgs() []string {
 	args := []string{
 		"-p",
@@ -148,7 +149,7 @@ func (h *handle) buildArgs() []string {
 	if h.spec.SystemPrompt != "" {
 		args = append(args, "--append-system-prompt", h.spec.SystemPrompt)
 	}
-	if h.resume != "" && claudeSessionAlive(h.spec.Cwd, h.resume) {
+	if h.resume != "" {
 		args = append(args, "--resume", h.resume)
 	}
 	args = append(args, h.spec.ExtraArgs...)
@@ -163,9 +164,13 @@ func (h *handle) Run(ctx context.Context, initPrompt *driver.PromptReq) error {
 		h.lmu.Unlock()
 		return driver.NewUnsupportedError("claude: session is closed")
 	}
+	if err := ctx.Err(); err != nil {
+		h.lmu.Unlock()
+		return err
+	}
 	h.setState(driver.ProcessState{Phase: driver.PhaseStarting})
 
-	tr, err := h.factory(ctx, h.execPath, h.buildArgs(), h.spec)
+	tr, err := h.factory(context.WithoutCancel(ctx), h.execPath, h.buildArgs(), h.spec)
 	if err != nil {
 		st := driver.ProcessState{Phase: driver.PhaseFailed}
 		if ae, ok := err.(*driver.AgentError); ok {
@@ -211,6 +216,7 @@ func (h *handle) Prompt(ctx context.Context, req driver.PromptReq) (driver.RunID
 	}
 	h.mu.Lock()
 	tr := h.tr
+	done := h.done
 	h.mu.Unlock()
 	if tr == nil {
 		return "", driver.NewTransportError("claude: prompt before Run")
@@ -222,25 +228,74 @@ func (h *handle) Prompt(ctx context.Context, req driver.PromptReq) (driver.RunID
 	h.setState(driver.ProcessState{Phase: driver.PhasePromptInFlight, SessionID: h.SessionID(), RunID: runID})
 
 	line := BuildUserMessage(req.Text) + "\n"
-	if _, err := tr.stdin().Write([]byte(line)); err != nil {
-		aerr := driver.NewTransportError("claude: write stdin: " + err.Error())
-		h.bus.Emit(driver.FailedEvent(h.key, h.SessionID(), runID, aerr))
+	payload := []byte(line)
+	n, err := tr.stdin().Write(payload)
+	if err != nil || n != len(payload) {
+		message := "claude: short write to stdin"
+		if err != nil {
+			message = "claude: write stdin: " + err.Error()
+		}
+		aerr := driver.NewTransportError(message)
+		h.lclosed = true
+		tr.kill()
+		if done != nil {
+			<-done
+		}
+		h.setState(driver.ProcessState{Phase: driver.PhaseClosed, SessionID: h.SessionID()})
+		h.bus.Close()
 		return runID, aerr
 	}
 	return runID, nil
 }
 
-// Cancel is a no-op for headless Claude: there is no in-band interrupt, and
-// killing the child would end the whole session. Report NotInFlight when idle,
-// Aborted is not truly achievable, so we return NotInFlight to be honest.
-func (h *handle) Cancel(ctx context.Context, run driver.RunID) (driver.CancelOutcome, error) {
-	if p := h.curRun.Load(); p != nil && *p != "" {
-		// A turn is in flight but headless Claude cannot interrupt it without
-		// tearing down the session. We surface Aborted semantics only by
-		// closing the session via Close; here we report the honest state.
-		return driver.CancelNotInFlight, driver.NewUnsupportedError("claude headless has no mid-turn interrupt; use Close")
+// Interrupt terminates the active headless process. The public session can
+// transparently resume the runtime-owned session id on its next turn.
+func (h *handle) Interrupt(ctx context.Context) error {
+	h.lmu.Lock()
+	if h.lclosed {
+		h.lmu.Unlock()
+		h.mu.Lock()
+		done := h.done
+		h.mu.Unlock()
+		if done != nil {
+			select {
+			case <-done:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		return nil
 	}
-	return driver.CancelNotInFlight, nil
+	if p := h.curRun.Load(); p == nil || *p == "" {
+		h.lmu.Unlock()
+		return nil
+	}
+	h.lclosed = true
+	h.interrupted.Store(true)
+	h.mu.Lock()
+	tr := h.tr
+	done := h.done
+	h.mu.Unlock()
+	h.lmu.Unlock()
+	if tr != nil {
+		tr.kill()
+	}
+	if done != nil {
+		select {
+		case <-done:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	h.setState(driver.ProcessState{Phase: driver.PhaseClosed, SessionID: h.SessionID()})
+	h.bus.Close()
+	return nil
+}
+
+// Continue returns unsupported because this transport cannot currently emit a
+// blocked permission/user-input event.
+func (h *handle) Continue(ctx context.Context, input string) (driver.RunID, error) {
+	return "", driver.NewUnsupportedError("claude: no blocked turn")
 }
 
 // Close terminates the child and closes the event bus. Idempotent; after Close,
@@ -249,6 +304,16 @@ func (h *handle) Close(ctx context.Context) error {
 	h.lmu.Lock()
 	if h.lclosed {
 		h.lmu.Unlock()
+		h.mu.Lock()
+		done := h.done
+		h.mu.Unlock()
+		if done != nil {
+			select {
+			case <-done:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
 		return nil
 	}
 	h.lclosed = true
@@ -266,6 +331,9 @@ func (h *handle) Close(ctx context.Context) error {
 		select {
 		case <-done:
 		case <-ctx.Done():
+			h.setState(driver.ProcessState{Phase: driver.PhaseClosed, SessionID: h.SessionID()})
+			h.bus.Close()
+			return ctx.Err()
 		}
 	}
 	h.setState(driver.ProcessState{Phase: driver.PhaseClosed, SessionID: h.SessionID()})
@@ -285,12 +353,20 @@ func (h *handle) readerLoop() {
 	for sc.Scan() {
 		h.handleLine(sc.Text())
 	}
+	// Reap the child before publishing terminal state. Close and Interrupt wait
+	// on done, so their return guarantees no zombie process remains.
+	_ = tr.wait()
 
 	// stdout closed: if a turn was in flight, report transport-closed.
 	if p := h.curRun.Load(); p != nil && *p != "" {
 		run := *p
 		h.curRun.Store(ptr(""))
-		h.bus.Emit(driver.CompletedEvent(h.key, h.SessionID(), run, driver.RunResult{FinishReason: driver.FinishTransportClosed}))
+		finish := driver.FinishTransportClosed
+		if h.interrupted.Swap(false) {
+			finish = driver.FinishCancelled
+		}
+		h.bus.Emit(driver.OutputEvent(h.key, h.SessionID(), run, driver.AgentEventItem{Kind: driver.ItemTurnEnd}))
+		h.bus.Emit(driver.CompletedEvent(h.key, h.SessionID(), run, driver.RunResult{FinishReason: finish}))
 	}
 }
 

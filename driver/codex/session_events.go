@@ -28,6 +28,12 @@ func (s *session) onEvent(ev AppServerEvent) {
 	case EvTokenUsage:
 		s.pendingUsage.Store(&ev.Usage)
 
+	case EvCommandApproval:
+		s.setBlocked(ev, driver.BlockedToolApproval, "Command requires approval")
+
+	case EvFileChangeApproval:
+		s.setBlocked(ev, driver.BlockedPermission, "File change requires approval")
+
 	case EvTurnCompleted:
 		s.finishTurn(run, ev)
 	}
@@ -54,6 +60,7 @@ func (s *session) onItemCompleted(run driver.RunID, item Item) {
 
 // finishTurn emits TurnEnd + Completed/Failed with any accumulated usage.
 func (s *session) finishTurn(run driver.RunID, ev AppServerEvent) {
+	defer s.finishTurnDone()
 	threadID := s.SessionID()
 	s.emit(run, driver.AgentEventItem{Kind: driver.ItemTurnEnd})
 
@@ -86,11 +93,13 @@ func (s *session) finishTurn(run driver.RunID, ev AppServerEvent) {
 // onTransportClosed is called when the shared child's stdout closes; fail any
 // in-flight run.
 func (s *session) onTransportClosed() {
+	s.transportClosed.Store(true)
 	run := s.currentRun()
 	if run != "" {
 		s.bus.Emit(driver.CompletedEvent(s.key, s.SessionID(), run, driver.RunResult{FinishReason: driver.FinishTransportClosed}))
 		s.curRun.Store(ptr(""))
 	}
+	s.setState(driver.ProcessState{Phase: driver.PhaseClosed, SessionID: s.SessionID()})
 }
 
 func (s *session) emit(run driver.RunID, item driver.AgentEventItem) {

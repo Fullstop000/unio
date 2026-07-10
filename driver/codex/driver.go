@@ -2,12 +2,16 @@ package codex
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/Fullstop000/unio/driver"
+	errcontract "github.com/Fullstop000/unio/errs"
 )
 
 // version reported to the app-server in initialize.
@@ -16,17 +20,18 @@ const clientVersion = "0.1.0"
 // Driver implements driver.ProtocolDriver for Codex app-server. One shared child
 // per agent key multiplexes threads; the registry caches it and evicts on death.
 type Driver struct {
-	registry *driver.Registry[*process]
-	factory  transportFactory
+	mu      sync.Mutex
+	process *process
+	factory transportFactory
 }
 
 // New constructs a Codex driver using the real app-server transport.
 func New() *Driver {
-	return &Driver{registry: driver.NewRegistry[*process](), factory: spawnProcTransport}
+	return &Driver{factory: spawnProcTransport}
 }
 
 func newWithTransport(f transportFactory) *Driver {
-	return &Driver{registry: driver.NewRegistry[*process](), factory: f}
+	return &Driver{factory: f}
 }
 
 // Transport implements driver.ProtocolDriver.
@@ -40,9 +45,8 @@ func (d *Driver) Probe(ctx context.Context) (driver.RuntimeProbe, error) {
 	return driver.RuntimeProbe{Auth: driver.AuthAuthed, Transport: driver.TransportCodexAppServer}, nil
 }
 
-// ListSessions is not implemented yet (would scan ~/.codex/sessions).
 func (d *Driver) ListSessions(ctx context.Context) ([]driver.StoredSessionMeta, error) {
-	return nil, nil
+	return listStoredSessions(ctx)
 }
 
 // OpenSession resolves the executable early (not_installed) and builds an idle
@@ -56,19 +60,20 @@ func (d *Driver) OpenSession(ctx context.Context, key driver.SessionKey, spec dr
 		return nil, aerr
 	}
 
-	agentKey := key
-	proc := d.registry.GetOrInit(agentKey, func() *process {
-		return newProcess(execPath, spec, d.factory, clientVersion)
-	})
-
 	bus := driver.NewEventBus()
-	s := &session{
-		key:    key,
-		spec:   spec,
-		proc:   proc,
-		resume: params.ResumeSessionID,
-		bus:    bus,
+	d.mu.Lock()
+	if d.process == nil || d.process.IsStale() {
+		d.process = newProcess(execPath, spec, d.factory, clientVersion)
 	}
+	proc := d.process
+	s := &session{key: key, spec: spec, proc: proc, resume: params.ResumeSessionID, bus: bus}
+	if !proc.acquire(s) {
+		proc = newProcess(execPath, spec, d.factory, clientVersion)
+		d.process = proc
+		s.proc = proc
+		_ = proc.acquire(s)
+	}
+	d.mu.Unlock()
 	s.state.Store(&driver.ProcessState{Phase: driver.PhaseIdle})
 	return &driver.SessionAttachment{Session: s, Events: bus}, nil
 }
@@ -81,13 +86,20 @@ type session struct {
 	resume driver.SessionID
 	bus    *driver.EventBus
 
-	threadID atomic.Pointer[string]
-	turnID   atomic.Pointer[string]
-	curRun   atomic.Pointer[string]
-	state    atomic.Pointer[driver.ProcessState]
+	threadID        atomic.Pointer[string]
+	turnID          atomic.Pointer[string]
+	curRun          atomic.Pointer[string]
+	state           atomic.Pointer[driver.ProcessState]
+	transportClosed atomic.Bool
+	stateMu         sync.Mutex
 	// pendingUsage holds the latest thread/tokenUsage for the in-flight turn,
 	// attached to the Completed event when the turn ends.
 	pendingUsage atomic.Pointer[TurnTokenUsage]
+
+	blockMu  sync.Mutex
+	block    *pendingBlock
+	doneMu   sync.Mutex
+	turnDone chan struct{}
 
 	// mu serialises the mutating lifecycle methods (Run/Prompt/Cancel/Close) so
 	// the SDK — not the caller — guarantees a Session is safe for concurrent
@@ -96,6 +108,11 @@ type session struct {
 	// (SessionID/ProcessState) stay lock-free on atomics.
 	mu     sync.Mutex
 	closed bool
+}
+
+type pendingBlock struct {
+	requestID json.RawMessage
+	reason    driver.BlockedReason
 }
 
 func (s *session) Key() driver.SessionKey { return s.key }
@@ -115,8 +132,17 @@ func (s *session) ProcessState() driver.ProcessState {
 }
 
 func (s *session) setState(st driver.ProcessState) {
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	if st.Phase != driver.PhaseClosed && (s.transportClosed.Load() || s.proc.IsStale()) {
+		st = driver.ProcessState{Phase: driver.PhaseClosed, SessionID: s.SessionID()}
+	}
 	s.state.Store(&st)
 	s.bus.Emit(driver.LifecycleEvent(s.key, st))
+}
+
+func (s *session) transportUnavailable() bool {
+	return s.transportClosed.Load() || s.proc.IsStale()
 }
 
 // Run starts the shared child (if needed) then starts or resumes this thread.
@@ -125,6 +151,10 @@ func (s *session) Run(ctx context.Context, initPrompt *driver.PromptReq) error {
 	if s.closed {
 		s.mu.Unlock()
 		return driver.NewUnsupportedError("codex: session is closed")
+	}
+	if s.transportUnavailable() {
+		s.mu.Unlock()
+		return driver.NewTransportError("codex app-server is closed")
 	}
 	s.setState(driver.ProcessState{Phase: driver.PhaseStarting})
 
@@ -135,7 +165,11 @@ func (s *session) Run(ctx context.Context, initPrompt *driver.PromptReq) error {
 		} else {
 			st.Err = driver.NewTransportError(err.Error())
 		}
-		s.setState(st)
+		if s.transportUnavailable() {
+			s.setState(driver.ProcessState{Phase: driver.PhaseClosed, SessionID: s.SessionID()})
+		} else {
+			s.setState(st)
+		}
 		s.mu.Unlock()
 		return err
 	}
@@ -145,6 +179,11 @@ func (s *session) Run(ctx context.Context, initPrompt *driver.PromptReq) error {
 		s.setState(driver.ProcessState{Phase: driver.PhaseFailed, Err: toAgentErr(err)})
 		s.mu.Unlock()
 		return err
+	}
+	if s.transportUnavailable() {
+		s.setState(driver.ProcessState{Phase: driver.PhaseClosed, SessionID: s.SessionID()})
+		s.mu.Unlock()
+		return driver.NewTransportError("codex app-server closed during thread start")
 	}
 
 	s.threadID.Store(&threadID)
@@ -164,17 +203,35 @@ func (s *session) Run(ctx context.Context, initPrompt *driver.PromptReq) error {
 // startOrResumeThread sends thread/resume (with liveness guard) or thread/start
 // and waits for the ThreadResponse carrying the thread id.
 func (s *session) startOrResumeThread(ctx context.Context) (string, error) {
-	if s.resume != "" && codexThreadAlive(s.resume) {
-		id := s.proc.allocID()
-		ch := s.proc.registerAndSend(id, "thread/resume", BuildThreadResume(id, s.resume, s.spec.SystemPrompt))
-		ev, err := waitResp(ctx, ch, s.proc.closed)
-		if err == nil && ev.Type == EvThreadResponse && ev.ThreadID != "" {
-			return ev.ThreadID, nil
+	if s.resume != "" {
+		if !codexThreadAlive(s.resume) {
+			return "", driver.NewSessionNotFoundError(s.resume)
 		}
-		// Fall through to a fresh start if resume failed/misfired.
+		id := s.proc.allocID()
+		ch, err := s.proc.registerAndSend(id, "thread/resume", BuildThreadResume(id, s.resume, s.spec.SystemPrompt))
+		if err != nil {
+			return "", err
+		}
+		ev, err := waitResp(ctx, ch, s.proc.closed)
+		if err != nil {
+			return "", err
+		}
+		if ev.Type == EvError {
+			return "", driver.NewRuntimeReportedError(ev.ErrMsg)
+		}
+		if ev.Type != EvThreadResponse || ev.ThreadID == "" {
+			return "", driver.NewProtocolError("codex: thread/resume returned no thread id")
+		}
+		if ev.ThreadID != s.resume {
+			return "", driver.NewProtocolError("codex: thread/resume changed the session id")
+		}
+		return ev.ThreadID, nil
 	}
 	id := s.proc.allocID()
-	ch := s.proc.registerAndSend(id, "thread/start", BuildThreadStart(id, s.spec.Model, s.spec.Cwd, s.spec.SystemPrompt))
+	ch, err := s.proc.registerAndSend(id, "thread/start", BuildThreadStart(id, s.spec.Model, s.spec.Cwd, s.spec.SystemPrompt))
+	if err != nil {
+		return "", err
+	}
 	ev, err := waitResp(ctx, ch, s.proc.closed)
 	if err != nil {
 		return "", err
@@ -196,57 +253,214 @@ func (s *session) Prompt(ctx context.Context, req driver.PromptReq) (driver.RunI
 	if s.closed {
 		return "", driver.NewUnsupportedError("codex: session is closed")
 	}
+	if s.transportUnavailable() {
+		return "", driver.NewTransportError("codex app-server is closed")
+	}
 	threadID := s.SessionID()
 	if threadID == "" {
 		return "", driver.NewTransportError("codex: prompt before Run")
 	}
 	runID := driver.NewRunID()
 	s.curRun.Store(&runID)
+	s.doneMu.Lock()
+	s.turnDone = make(chan struct{})
+	s.doneMu.Unlock()
 	s.setState(driver.ProcessState{Phase: driver.PhasePromptInFlight, SessionID: threadID, RunID: runID})
+	if s.transportUnavailable() {
+		s.clearSubmittedTurn()
+		return runID, driver.NewTransportError("codex app-server closed before prompt submission")
+	}
 
 	id := s.proc.allocID()
-	ch := s.proc.registerAndSend(id, "turn/start", BuildTurnStart(id, threadID, req.Text))
+	ch, sendErr := s.proc.registerAndSend(id, "turn/start", BuildTurnStart(id, threadID, req.Text))
+	if sendErr != nil {
+		s.clearSubmittedTurn()
+		return runID, sendErr
+	}
 	ev, err := waitResp(ctx, ch, s.proc.closed)
 	if err != nil {
 		aerr := toAgentErr(err)
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			s.stopSubmittedTurn(ch)
+		}
 		s.bus.Emit(driver.FailedEvent(s.key, threadID, runID, aerr))
 		return runID, aerr
 	}
 	if ev.Type == EvError {
 		aerr := driver.NewRuntimeReportedError(ev.ErrMsg)
+		s.clearSubmittedTurn()
 		s.bus.Emit(driver.FailedEvent(s.key, threadID, runID, aerr))
 		return runID, aerr
 	}
-	if ev.Type == EvTurnResponse && ev.TurnID != "" {
-		s.turnID.Store(&ev.TurnID)
-		s.proc.mapTurn(ev.TurnID, threadID)
+	if ev.Type != EvTurnResponse || ev.TurnID == "" {
+		aerr := driver.NewProtocolError("codex: turn/start returned no turn id")
+		s.proc.shutdown()
+		<-s.proc.closed
+		s.clearSubmittedTurn()
+		s.bus.Emit(driver.FailedEvent(s.key, threadID, runID, aerr))
+		return runID, aerr
+	}
+	s.turnID.Store(&ev.TurnID)
+	s.proc.mapTurn(ev.TurnID, threadID)
+	return runID, nil
+}
+
+// Interrupt sends turn/interrupt for the in-flight turn. Codex supports graceful
+// mid-turn interrupt (unlike Claude headless).
+func (s *session) Interrupt(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.interruptLocked(ctx)
+}
+
+func (s *session) interruptLocked(ctx context.Context) error {
+	if s.closed {
+		return nil
+	}
+	if s.transportUnavailable() {
+		return driver.NewTransportError("codex app-server is closed")
+	}
+	tp := s.turnID.Load()
+	if tp == nil || *tp == "" {
+		return nil
+	}
+	id := s.proc.allocID()
+	ch, err := s.proc.registerAndSend(id, "turn/interrupt", BuildTurnInterrupt(id, s.SessionID(), *tp))
+	if err != nil {
+		return err
+	}
+	ev, err := waitResp(ctx, ch, s.proc.closed)
+	if err != nil {
+		return toAgentErr(err)
+	}
+	if ev.Type == EvError {
+		return driver.NewRuntimeReportedError(ev.ErrMsg)
+	}
+	if ev.Type != EvTurnInterruptResponse {
+		return driver.NewProtocolError("codex: unexpected turn/interrupt response")
+	}
+	s.doneMu.Lock()
+	done := s.turnDone
+	s.doneMu.Unlock()
+	if done == nil {
+		return nil
+	}
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-s.proc.closed:
+		return driver.NewTransportError("codex app-server closed while interrupting")
+	}
+}
+
+// stopSubmittedTurn resolves the ambiguous interval after turn/start was
+// written but its acknowledgement lost the race with context cancellation.
+// It prefers a normal turn interrupt; if acknowledgement/interrupt cannot be
+// confirmed promptly, it tears down and reaps the shared process before
+// Prompt returns, so the public session can never expose a false Idle state.
+func (s *session) stopSubmittedTurn(ch chan AppServerEvent) {
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ev, err := waitResp(cleanupCtx, ch, s.proc.closed)
+	if err == nil {
+		if ev.Type == EvError {
+			s.clearSubmittedTurn()
+			cancel()
+			return
+		}
+		if ev.Type == EvTurnResponse && ev.TurnID != "" {
+			s.turnID.Store(&ev.TurnID)
+			s.proc.mapTurn(ev.TurnID, s.SessionID())
+		}
+		turnID := s.turnID.Load()
+		if s.currentRun() == "" || (turnID != nil && *turnID != "" && s.interruptLocked(cleanupCtx) == nil) {
+			cancel()
+			return
+		}
+	}
+	cancel()
+	s.proc.shutdown()
+	<-s.proc.closed
+}
+
+func (s *session) clearSubmittedTurn() {
+	s.curRun.Store(ptr(""))
+	s.turnID.Store(ptr(""))
+	s.finishTurnDone()
+	s.setState(driver.ProcessState{Phase: driver.PhaseActive, SessionID: s.SessionID()})
+}
+
+func (s *session) Continue(ctx context.Context, input string) (driver.RunID, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return "", driver.NewUnsupportedError("codex: session is closed")
+	}
+	if s.transportUnavailable() {
+		return "", driver.NewTransportError("codex app-server is closed")
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	s.blockMu.Lock()
+	block := s.block
+	if block == nil {
+		s.blockMu.Unlock()
+		return "", driver.NewInvalidStateError("codex: no blocked turn")
+	}
+	decision, ok := map[string]string{
+		"allow_once": "accept",
+		"deny":       "decline",
+		"cancel":     "cancel",
+	}[input]
+	if !ok {
+		s.blockMu.Unlock()
+		return "", driver.NewInvalidStateError("codex: invalid blocked response")
+	}
+	s.block = nil
+	s.blockMu.Unlock()
+	runID := driver.NewRunID()
+	s.curRun.Store(&runID)
+	s.setState(driver.ProcessState{Phase: driver.PhasePromptInFlight, SessionID: s.SessionID(), RunID: runID})
+	if s.transportUnavailable() {
+		s.curRun.Store(ptr(""))
+		return runID, driver.NewTransportError("codex app-server closed before continue")
+	}
+	if err := s.proc.writeLine(BuildApprovalResponse(block.requestID, decision)); err != nil {
+		s.proc.shutdown()
+		s.curRun.Store(ptr(""))
+		s.setState(driver.ProcessState{Phase: driver.PhaseClosed, SessionID: s.SessionID()})
+		return runID, err
 	}
 	return runID, nil
 }
 
-// Cancel sends turn/interrupt for the in-flight turn. Codex supports graceful
-// mid-turn interrupt (unlike Claude headless).
-func (s *session) Cancel(ctx context.Context, run driver.RunID) (driver.CancelOutcome, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.closed {
-		return driver.CancelNotInFlight, nil
+func (s *session) setBlocked(ev AppServerEvent, kind driver.BlockedKind, message string) {
+	run := s.currentRun()
+	reason := driver.BlockedReason{
+		Kind: kind, Message: message,
+		Options: []driver.BlockOption{
+			{Value: "allow_once", Label: "Allow once"},
+			{Value: "deny", Label: "Deny"},
+		},
 	}
-	cur := s.curRun.Load()
-	if cur == nil || *cur == "" {
-		return driver.CancelNotInFlight, nil
+	s.blockMu.Lock()
+	s.block = &pendingBlock{requestID: append(json.RawMessage(nil), ev.RequestID...), reason: reason}
+	s.blockMu.Unlock()
+	s.bus.Emit(driver.BlockedEvent(s.key, s.SessionID(), run, reason))
+	s.curRun.Store(ptr(""))
+	s.setState(driver.ProcessState{Phase: driver.PhaseBlocked, SessionID: s.SessionID(), RunID: run})
+}
+
+func (s *session) finishTurnDone() {
+	s.doneMu.Lock()
+	done := s.turnDone
+	s.turnDone = nil
+	s.doneMu.Unlock()
+	if done != nil {
+		close(done)
 	}
-	tp := s.turnID.Load()
-	if tp == nil || *tp == "" {
-		return driver.CancelNotInFlight, nil
-	}
-	id := s.proc.allocID()
-	ch := s.proc.registerAndSend(id, "turn/interrupt", BuildTurnInterrupt(id, s.SessionID(), *tp))
-	if _, err := waitResp(ctx, ch, s.proc.closed); err != nil {
-		return driver.CancelNotInFlight, toAgentErr(err)
-	}
-	// The turn/completed{interrupted} notification will finalise the run.
-	return driver.CancelAborted, nil
 }
 
 // Close unregisters the session (tearing down the shared child only when this
@@ -264,8 +478,16 @@ func (s *session) Close(ctx context.Context) error {
 	if tid := s.SessionID(); tid != "" {
 		s.proc.unregisterSession(tid)
 	}
+	wait := s.proc.release(s)
 	s.setState(driver.ProcessState{Phase: driver.PhaseClosed, SessionID: s.SessionID()})
 	s.bus.Close()
+	if wait {
+		select {
+		case <-s.proc.closed:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 	return nil
 }
 
@@ -311,6 +533,12 @@ func toAgentErr(err error) *driver.AgentError {
 	if ae, ok := err.(*driver.AgentError); ok {
 		return ae
 	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return errcontract.Wrap(errcontract.KindTimeout, "codex: request deadline exceeded", err)
+	}
+	if errors.Is(err, context.Canceled) {
+		return errcontract.Wrap(errcontract.KindTransport, "codex: request canceled", err)
+	}
 	return driver.NewTransportError(err.Error())
 }
 
@@ -320,7 +548,7 @@ func waitResp(ctx context.Context, ch chan AppServerEvent, closed chan struct{})
 	case ev := <-ch:
 		return ev, nil
 	case <-ctx.Done():
-		return AppServerEvent{}, driver.NewTimeoutError("codex: request timed out")
+		return AppServerEvent{}, ctx.Err()
 	case <-closed:
 		return AppServerEvent{}, driver.NewTransportError("codex app-server closed")
 	}

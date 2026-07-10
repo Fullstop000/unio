@@ -22,7 +22,7 @@ import (
 )
 
 type outcome struct {
-	agent unio.Agent
+	agent unio.AgentKind
 	res   unio.Result
 	err   error
 }
@@ -31,21 +31,28 @@ type outcome struct {
 const prompt = "Reply with exactly one word: hello"
 
 func main() {
-	agents := []unio.Agent{unio.Claude, unio.Codex}
+	agents := []unio.AgentKind{unio.Claude, unio.Codex}
 	ctx := context.Background()
 
 	// Fan out: one Run per installed agent, results collected on a channel.
 	results := make(chan outcome, len(agents))
 	var wg sync.WaitGroup
 	for _, a := range agents {
-		if !unio.Installed(a) {
-			fmt.Printf("skip %s (not installed)\n", a)
-			continue
-		}
 		wg.Add(1)
-		go func(a unio.Agent) {
+		go func(a unio.AgentKind) {
 			defer wg.Done()
-			res, err := unio.Run(ctx, a, prompt)
+			agent, err := unio.New(a)
+			if err != nil {
+				results <- outcome{agent: a, err: err}
+				return
+			}
+			defer agent.Close()
+			session, err := agent.NewSession(ctx)
+			if err != nil {
+				results <- outcome{agent: a, err: err}
+				return
+			}
+			res, err := session.Run(ctx, prompt)
 			results <- outcome{agent: a, res: res, err: err}
 		}(a)
 	}
@@ -59,7 +66,7 @@ func main() {
 			fmt.Printf("[%s] error: %v\n", o.agent, o.err)
 			continue
 		}
-		fmt.Printf("[%s] %s (finish=%s)\n", o.agent, o.res.Text, o.res.FinishReason)
+		fmt.Printf("[%s] %s\n", o.agent, o.res.Text)
 		for model, u := range o.res.Usage {
 			acc := totals[model]
 			acc.Add(u)

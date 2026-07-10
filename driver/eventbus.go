@@ -17,10 +17,10 @@ const (
 // EventBus is a single-inbox, multi-subscriber fan-out for AgentEvents. Drivers
 // publish via Emit; consumers Subscribe to get an independent bounded channel.
 //
-// Back-pressure policy: a full observer queue drops the event (incrementing a
-// counter) instead of blocking the dispatcher — a slow consumer degrades only
-// its own stream. This mirrors Chorus's EventFanOut but is owned by unio so the
-// SDK has zero host dependency.
+// Back-pressure policy: a full observer queue drops an event (incrementing a
+// counter) instead of blocking the dispatcher. Terminal completed, failed, and
+// blocked events evict one older buffered event so a slow consumer still learns
+// how its turn stopped.
 //
 // Lifecycle: the dispatcher goroutine starts on the first Subscribe (exactly
 // once). Close signals it to drain the inbox and exit; late Subscribes after
@@ -58,7 +58,7 @@ func (b *EventBus) Emit(ev AgentEvent) {
 	select {
 	case b.inbound <- ev:
 	default:
-		b.dropped.Add(1)
+		b.makeRoomForTerminal(b.inbound, ev)
 	}
 }
 
@@ -125,9 +125,30 @@ func (b *EventBus) fanout(ev AgentEvent) {
 		select {
 		case ch <- ev:
 		default:
-			b.dropped.Add(1)
+			b.makeRoomForTerminal(ch, ev)
 		}
 	}
+}
+
+func (b *EventBus) makeRoomForTerminal(ch chan AgentEvent, ev AgentEvent) {
+	if !terminalEvent(ev.Type) {
+		b.dropped.Add(1)
+		return
+	}
+	select {
+	case <-ch:
+		b.dropped.Add(1)
+	default:
+	}
+	select {
+	case ch <- ev:
+	default:
+		b.dropped.Add(1)
+	}
+}
+
+func terminalEvent(typ EventType) bool {
+	return typ == EventCompleted || typ == EventFailed || typ == EventBlocked
 }
 
 // closeObservers closes and clears every observer channel.
