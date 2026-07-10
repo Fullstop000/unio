@@ -57,18 +57,8 @@ func TestEventBusSlowObserverDoesNotStallFast(t *testing.T) {
 	total := observerCapacity + 20
 	for i := 0; i < total; i++ {
 		bus.Emit(LifecycleEvent(key, ProcessState{Phase: PhaseActive}))
-	}
-
-	got := 0
-	for got < total {
-		select {
-		case _, ok := <-fast:
-			if !ok {
-				t.Fatalf("fast observer closed early at %d/%d", got, total)
-			}
-			got++
-		case <-time.After(time.Second):
-			t.Fatalf("fast observer stalled at %d/%d (slow peer should not block it)", got, total)
+		if _, ok := drainOne(t, fast, time.Second); !ok {
+			t.Fatalf("fast observer closed early at %d/%d", i, total)
 		}
 	}
 	if bus.Dropped() == 0 {

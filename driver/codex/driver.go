@@ -292,10 +292,16 @@ func (s *session) Prompt(ctx context.Context, req driver.PromptReq) (driver.RunI
 		s.bus.Emit(driver.FailedEvent(s.key, threadID, runID, aerr))
 		return runID, aerr
 	}
-	if ev.Type == EvTurnResponse && ev.TurnID != "" {
-		s.turnID.Store(&ev.TurnID)
-		s.proc.mapTurn(ev.TurnID, threadID)
+	if ev.Type != EvTurnResponse || ev.TurnID == "" {
+		aerr := driver.NewProtocolError("codex: turn/start returned no turn id")
+		s.proc.shutdown()
+		<-s.proc.closed
+		s.clearSubmittedTurn()
+		s.bus.Emit(driver.FailedEvent(s.key, threadID, runID, aerr))
+		return runID, aerr
 	}
+	s.turnID.Store(&ev.TurnID)
+	s.proc.mapTurn(ev.TurnID, threadID)
 	return runID, nil
 }
 
@@ -323,8 +329,15 @@ func (s *session) interruptLocked(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if _, err := waitResp(ctx, ch, s.proc.closed); err != nil {
+	ev, err := waitResp(ctx, ch, s.proc.closed)
+	if err != nil {
 		return toAgentErr(err)
+	}
+	if ev.Type == EvError {
+		return driver.NewRuntimeReportedError(ev.ErrMsg)
+	}
+	if ev.Type != EvTurnInterruptResponse {
+		return driver.NewProtocolError("codex: unexpected turn/interrupt response")
 	}
 	s.doneMu.Lock()
 	done := s.turnDone

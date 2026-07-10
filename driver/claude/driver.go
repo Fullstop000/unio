@@ -216,6 +216,7 @@ func (h *handle) Prompt(ctx context.Context, req driver.PromptReq) (driver.RunID
 	}
 	h.mu.Lock()
 	tr := h.tr
+	done := h.done
 	h.mu.Unlock()
 	if tr == nil {
 		return "", driver.NewTransportError("claude: prompt before Run")
@@ -227,9 +228,21 @@ func (h *handle) Prompt(ctx context.Context, req driver.PromptReq) (driver.RunID
 	h.setState(driver.ProcessState{Phase: driver.PhasePromptInFlight, SessionID: h.SessionID(), RunID: runID})
 
 	line := BuildUserMessage(req.Text) + "\n"
-	if _, err := tr.stdin().Write([]byte(line)); err != nil {
-		aerr := driver.NewTransportError("claude: write stdin: " + err.Error())
-		h.bus.Emit(driver.FailedEvent(h.key, h.SessionID(), runID, aerr))
+	payload := []byte(line)
+	n, err := tr.stdin().Write(payload)
+	if err != nil || n != len(payload) {
+		message := "claude: short write to stdin"
+		if err != nil {
+			message = "claude: write stdin: " + err.Error()
+		}
+		aerr := driver.NewTransportError(message)
+		h.lclosed = true
+		tr.kill()
+		if done != nil {
+			<-done
+		}
+		h.setState(driver.ProcessState{Phase: driver.PhaseClosed, SessionID: h.SessionID()})
+		h.bus.Close()
 		return runID, aerr
 	}
 	return runID, nil
@@ -241,6 +254,16 @@ func (h *handle) Interrupt(ctx context.Context) error {
 	h.lmu.Lock()
 	if h.lclosed {
 		h.lmu.Unlock()
+		h.mu.Lock()
+		done := h.done
+		h.mu.Unlock()
+		if done != nil {
+			select {
+			case <-done:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
 		return nil
 	}
 	if p := h.curRun.Load(); p == nil || *p == "" {
@@ -281,6 +304,16 @@ func (h *handle) Close(ctx context.Context) error {
 	h.lmu.Lock()
 	if h.lclosed {
 		h.lmu.Unlock()
+		h.mu.Lock()
+		done := h.done
+		h.mu.Unlock()
+		if done != nil {
+			select {
+			case <-done:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
 		return nil
 	}
 	h.lclosed = true
@@ -298,6 +331,9 @@ func (h *handle) Close(ctx context.Context) error {
 		select {
 		case <-done:
 		case <-ctx.Done():
+			h.setState(driver.ProcessState{Phase: driver.PhaseClosed, SessionID: h.SessionID()})
+			h.bus.Close()
+			return ctx.Err()
 		}
 	}
 	h.setState(driver.ProcessState{Phase: driver.PhaseClosed, SessionID: h.SessionID()})

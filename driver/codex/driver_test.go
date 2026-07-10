@@ -38,6 +38,7 @@ type scriptedServer struct {
 	turnStartSeen    chan struct{}
 	turnStartGate    chan struct{}
 	interruptSeen    chan struct{}
+	interruptError   bool
 	killed           chan struct{}
 	waited           chan struct{}
 }
@@ -182,9 +183,14 @@ func (s *scriptedServer) loop() {
 		case "turn/interrupt":
 			s.mu.Lock()
 			interruptSeen := s.interruptSeen
+			interruptError := s.interruptError
 			s.mu.Unlock()
 			if interruptSeen != nil {
 				close(interruptSeen)
+			}
+			if interruptError {
+				s.send(map[string]any{"id": idv, "error": map[string]any{"message": "interrupt rejected"}})
+				continue
 			}
 			s.send(map[string]any{"id": idv, "result": map[string]any{}})
 			// emit the interrupted completion for the current turn.
@@ -290,7 +296,6 @@ func TestCodexDriverFullTurn(t *testing.T) {
 func TestCodexRoutesSoleInFlightTurnWithoutThreadID(t *testing.T) {
 	srv := newScriptedServer()
 	srv.omitThreadID = true
-	srv.omitTurnIDResp = true
 	d := newWithTransport(func(ctx context.Context, execPath string, spec driver.AgentSpec) (stdioTransport, error) {
 		return srv, nil
 	})
@@ -532,6 +537,47 @@ func TestCodexPromptCancellationWaitsForConfirmedInterrupt(t *testing.T) {
 	case <-srv.interruptSeen:
 	case <-time.After(time.Second):
 		t.Fatal("cancelled Prompt did not send turn/interrupt")
+	}
+}
+
+func TestCodexRejectsTurnStartWithoutTurnID(t *testing.T) {
+	srv := newScriptedServer()
+	srv.omitTurnIDResp = true
+	d := newWithTransport(func(context.Context, string, driver.AgentSpec) (stdioTransport, error) { return srv, nil })
+	att, err := d.OpenSession(context.Background(), "missing-turn", driver.AgentSpec{ExecutablePath: fakeCodex(t)}, driver.OpenParams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer att.Session.Close(context.Background())
+	if err := att.Session.Run(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := att.Session.Prompt(context.Background(), driver.PromptReq{Text: "hello"}); err == nil {
+		t.Fatal("turn/start without a turn ID was accepted")
+	}
+}
+
+func TestCodexSurfacesRejectedInterrupt(t *testing.T) {
+	srv := newScriptedServer()
+	srv.holdTurn = true
+	srv.interruptError = true
+	d := newWithTransport(func(context.Context, string, driver.AgentSpec) (stdioTransport, error) { return srv, nil })
+	att, err := d.OpenSession(context.Background(), "interrupt-error", driver.AgentSpec{ExecutablePath: fakeCodex(t)}, driver.OpenParams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer att.Session.Close(context.Background())
+	if err := att.Session.Run(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := att.Session.Prompt(context.Background(), driver.PromptReq{Text: "long"}); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	err = att.Session.Interrupt(ctx)
+	if kind, ok := driverErrorKind(err); !ok || kind != driver.ErrRuntimeReported {
+		t.Fatalf("interrupt error = %v; want runtime_reported", err)
 	}
 }
 

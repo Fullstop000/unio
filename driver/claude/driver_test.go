@@ -18,13 +18,15 @@ import (
 // through the real handle/reader loop, so the driver's session logic is tested
 // without a real `claude` process. Stdin writes are captured for assertions.
 type scriptedTransport struct {
-	lines   []string
-	pr      *io.PipeReader
-	pw      *io.PipeWriter
-	mu      sync.Mutex
-	written []string
-	closed  chan struct{}
-	waited  chan struct{}
+	lines      []string
+	pr         *io.PipeReader
+	pw         *io.PipeWriter
+	mu         sync.Mutex
+	written    []string
+	closed     chan struct{}
+	waited     chan struct{}
+	waitGate   chan struct{}
+	shortWrite bool
 }
 
 func newScriptedTransport(lines []string) *scriptedTransport {
@@ -43,6 +45,9 @@ func (s *scriptedTransport) stdout() *bufio.Scanner {
 
 func (s *scriptedTransport) wait() error {
 	<-s.closed
+	if s.waitGate != nil {
+		<-s.waitGate
+	}
 	close(s.waited)
 	return nil
 }
@@ -72,6 +77,9 @@ func (w *captureWriter) Write(p []byte) (int, error) {
 	w.s.mu.Lock()
 	w.s.written = append(w.s.written, string(p))
 	w.s.mu.Unlock()
+	if w.s.shortWrite && len(p) > 0 {
+		return len(p) - 1, nil
+	}
 	return len(p), nil
 }
 
@@ -255,6 +263,52 @@ func TestClaudeInterruptKillsTurnAsCancelled(t *testing.T) {
 	last := evs[len(evs)-1]
 	if last.Result.FinishReason != driver.FinishCancelled {
 		t.Fatalf("finish = %q; want cancelled", last.Result.FinishReason)
+	}
+}
+
+func TestClaudePromptRejectsShortWrite(t *testing.T) {
+	tr := newScriptedTransport(nil)
+	tr.shortWrite = true
+	d := newWithTransport(func(context.Context, string, []string, driver.AgentSpec) (transport, error) { return tr, nil })
+	att, err := d.OpenSession(context.Background(), "short-write", driver.AgentSpec{ExecutablePath: fakeInstalledBinary(t)}, driver.OpenParams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := att.Session.Run(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := att.Session.Prompt(context.Background(), driver.PromptReq{Text: "hello"}); err == nil {
+		t.Fatal("short JSONL write was accepted")
+	}
+}
+
+func TestClaudeCloseReturnsContextErrorBeforeReap(t *testing.T) {
+	tr := newScriptedTransport(nil)
+	tr.waitGate = make(chan struct{})
+	d := newWithTransport(func(context.Context, string, []string, driver.AgentSpec) (transport, error) { return tr, nil })
+	att, err := d.OpenSession(context.Background(), "close-timeout", driver.AgentSpec{ExecutablePath: fakeInstalledBinary(t)}, driver.OpenParams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := att.Session.Run(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	err = att.Session.Close(ctx)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Close error = %v; want context deadline", err)
+	}
+	retryDone := make(chan error, 1)
+	go func() { retryDone <- att.Session.Close(context.Background()) }()
+	select {
+	case err := <-retryDone:
+		t.Fatalf("retry Close returned before reaping: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(tr.waitGate)
+	if err := <-retryDone; err != nil {
+		t.Fatalf("retry Close after reaping: %v", err)
 	}
 }
 
