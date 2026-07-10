@@ -11,22 +11,27 @@ import (
 	"github.com/Fullstop000/unio"
 )
 
-// Real Codex E2E via the facade — proves unio.Run drives the app-server
-// protocol end to end.
+// Real Codex E2E proves Agent -> Session -> Run drives app-server end to end.
 func TestReal_Codex_Run(t *testing.T) {
-	if !unio.Installed(unio.Codex) {
+	agent, err := unio.New(unio.Codex, unio.WithModel("gpt-5.5"))
+	if err != nil {
 		t.Skip("codex CLI not installed; skipping real E2E")
 	}
+	defer agent.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	res, err := unio.Run(ctx, unio.Codex, "Reply with exactly one word: pong", unio.WithModel("gpt-5.5"))
+	session, err := agent.NewSession(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := session.Run(ctx, "Reply with exactly one word: pong")
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	if strings.TrimSpace(res.Text) == "" {
 		t.Fatal("expected non-empty assistant text")
 	}
-	t.Logf("codex said %q; finish=%s", res.Text, res.FinishReason)
+	t.Logf("codex said %q", res.Text)
 	for model, u := range res.Usage {
 		t.Logf("usage[%s]: in=%d out=%d cacheRead=%d", model, u.InputTokens, u.OutputTokens, u.CacheReadTokens)
 	}
@@ -36,20 +41,23 @@ func TestReal_Codex_Run(t *testing.T) {
 // headless lacks. Start a long turn, Cancel it, then prove the session survives
 // and completes a follow-up turn.
 func TestReal_Codex_Interrupt(t *testing.T) {
-	if !unio.Installed(unio.Codex) {
+	agent, err := unio.New(unio.Codex, unio.WithModel("gpt-5.5"))
+	if err != nil {
 		t.Skip("codex CLI not installed; skipping real E2E")
 	}
+	defer agent.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
-	s, err := unio.Start(ctx, unio.Codex, unio.WithModel("gpt-5.5"))
+	s, err := agent.NewSession(ctx)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	defer s.Close()
-
 	// Fire a long turn; the stream drains when the turn ends (naturally or
 	// interrupted).
-	st := s.Prompt(ctx, "Count slowly from 1 to 500, one number per line.")
+	st, err := s.Stream(ctx, "Count slowly from 1 to 500, one number per line.")
+	if err != nil {
+		t.Fatal(err)
+	}
 	done := make(chan struct{})
 	go func() {
 		for st.Next() {
@@ -59,11 +67,9 @@ func TestReal_Codex_Interrupt(t *testing.T) {
 	}()
 
 	time.Sleep(3 * time.Second)
-	aborted, err := s.Cancel(ctx)
-	if err != nil {
-		t.Fatalf("cancel: %v", err)
+	if err := s.Interrupt(ctx); err != nil {
+		t.Fatalf("interrupt: %v", err)
 	}
-	t.Logf("cancel aborted=%v", aborted)
 
 	select {
 	case <-done:
@@ -72,7 +78,7 @@ func TestReal_Codex_Interrupt(t *testing.T) {
 	}
 
 	// Session must survive the interrupt and answer a follow-up.
-	res, err := s.Prompt(ctx, "Reply with exactly one word: ok").Result()
+	res, err := s.Run(ctx, "Reply with exactly one word: ok")
 	if err != nil {
 		t.Fatalf("follow-up prompt after interrupt: %v", err)
 	}

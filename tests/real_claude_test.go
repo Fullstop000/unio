@@ -17,13 +17,18 @@ import (
 	"github.com/Fullstop000/unio"
 )
 
-// Real Claude E2E via the high-level facade. Proves unio.Run drives a live
-// claude CLI end to end in one call.
+// Real Claude E2E proves Agent -> Session -> Run drives a live CLI end to end.
 func TestReal_Claude_Run(t *testing.T) {
-	if !unio.Installed(unio.Claude) {
+	agent, err := unio.New(unio.Claude)
+	if err != nil {
 		t.Skip("claude CLI not installed; skipping real E2E")
 	}
-	res, err := unio.Run(context.Background(), unio.Claude, "Reply with exactly one word: ping")
+	defer agent.Close()
+	session, err := agent.NewSession(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := session.Run(context.Background(), "Reply with exactly one word: ping")
 	if err != nil {
 		skipClaudeEnvError(t, err)
 		t.Fatalf("run: %v", err)
@@ -34,7 +39,7 @@ func TestReal_Claude_Run(t *testing.T) {
 	if res.SessionID == "" {
 		t.Fatal("expected a runtime session id")
 	}
-	t.Logf("claude said %q; finish=%s", res.Text, res.FinishReason)
+	t.Logf("claude said %q", res.Text)
 	for model, u := range res.Usage {
 		t.Logf("usage[%s]: in=%d out=%d cost=$%.4f", model, u.InputTokens, u.OutputTokens, u.CostUSD)
 	}
@@ -42,17 +47,20 @@ func TestReal_Claude_Run(t *testing.T) {
 
 // Real Claude streaming via the facade Stream handle.
 func TestReal_Claude_Stream(t *testing.T) {
-	if !unio.Installed(unio.Claude) {
+	agent, err := unio.New(unio.Claude)
+	if err != nil {
 		t.Skip("claude CLI not installed; skipping real E2E")
 	}
-	s, err := unio.Start(context.Background(), unio.Claude)
+	defer agent.Close()
+	s, err := agent.NewSession(context.Background())
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	defer s.Close()
-
 	var text strings.Builder
-	st := s.Prompt(context.Background(), "Reply with exactly one word: ping")
+	st, err := s.Stream(context.Background(), "Reply with exactly one word: ping")
+	if err != nil {
+		t.Fatal(err)
+	}
 	for st.Next() {
 		if ev := st.Event(); ev.Kind == unio.KindText {
 			text.WriteString(ev.Text)
