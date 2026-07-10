@@ -107,9 +107,10 @@ type process struct {
 	dead      atomic.Bool
 	lifecycle sync.Mutex
 
-	mu     sync.Mutex
-	tr     stdioTransport
-	nextID uint64
+	mu      sync.Mutex
+	writeMu sync.Mutex
+	tr      stdioTransport
+	nextID  uint64
 	// pendingReqs maps request id → waiter; the reader routes responses here.
 	pendingReqs map[uint64]*pending
 	// sessions maps threadId → the live session handle, so notifications route
@@ -152,7 +153,7 @@ func (p *process) ensureStarted(ctx context.Context) error {
 		tr, err := p.factory(context.WithoutCancel(ctx), p.execPath, p.spec)
 		if err != nil {
 			p.startErr = err
-			p.dead.Store(true)
+			p.shutdown()
 			return
 		}
 		p.mu.Lock()
@@ -162,26 +163,32 @@ func (p *process) ensureStarted(ctx context.Context) error {
 		go p.readerLoop()
 
 		// initialize (id 0) → wait for response → send initialized.
-		respCh := p.registerAndSend(0, "initialize", BuildInitialize(0, p.version))
+		respCh, err := p.registerAndSend(0, "initialize", BuildInitialize(0, p.version))
+		if err != nil {
+			p.startErr = err
+			p.shutdown()
+			return
+		}
 		select {
 		case ev := <-respCh:
 			if ev.Type == EvError {
 				p.startErr = driver.NewProtocolError("codex initialize failed: " + ev.ErrMsg)
-				tr.kill()
-				p.dead.Store(true)
+				p.shutdown()
 				return
 			}
 		case <-ctx.Done():
 			p.startErr = ctx.Err()
-			tr.kill()
-			p.dead.Store(true)
+			p.shutdown()
 			return
 		case <-p.closed:
 			p.startErr = driver.NewTransportError(p.closedMessage("codex app-server closed during initialize"))
-			p.dead.Store(true)
 			return
 		}
-		p.writeLine(BuildInitialized())
+		if err := p.writeLine(BuildInitialized()); err != nil {
+			p.startErr = err
+			p.shutdown()
+			return
+		}
 		p.started.Store(true)
 	})
 	return p.startErr
@@ -198,23 +205,39 @@ func (p *process) allocID() uint64 {
 // registerAndSend records a pending waiter for id+method, then writes the line.
 // The waiter MUST be registered before the write so a fast response can't race
 // ahead of the map insert.
-func (p *process) registerAndSend(id uint64, method, line string) chan AppServerEvent {
+func (p *process) registerAndSend(id uint64, method, line string) (chan AppServerEvent, error) {
 	ch := make(chan AppServerEvent, 1)
 	p.mu.Lock()
 	p.pendingReqs[id] = &pending{method: method, ch: ch}
 	p.mu.Unlock()
-	p.writeLine(line)
-	return ch
+	if err := p.writeLine(line); err != nil {
+		p.mu.Lock()
+		delete(p.pendingReqs, id)
+		p.mu.Unlock()
+		p.shutdown()
+		return ch, err
+	}
+	return ch, nil
 }
 
-func (p *process) writeLine(line string) {
+func (p *process) writeLine(line string) error {
+	p.writeMu.Lock()
+	defer p.writeMu.Unlock()
 	p.mu.Lock()
 	tr := p.tr
 	p.mu.Unlock()
 	if tr == nil {
-		return
+		return driver.NewTransportError("codex app-server is not running")
 	}
-	_, _ = tr.stdin().Write([]byte(line + "\n"))
+	payload := []byte(line + "\n")
+	n, err := tr.stdin().Write(payload)
+	if err != nil {
+		return driver.NewTransportError("codex: write stdin: " + err.Error())
+	}
+	if n != len(payload) {
+		return driver.NewTransportError("codex: short write to stdin")
+	}
+	return nil
 }
 
 // registerSession/unregisterSession maintain the threadId → session map.

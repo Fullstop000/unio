@@ -236,15 +236,17 @@ type recordingSpecDriver struct {
 
 type staleAttachmentDriver struct {
 	driver.ProtocolDriver
-	mu     sync.Mutex
-	opens  int
-	latest *staleAttachmentSession
+	mu              sync.Mutex
+	opens           int
+	failFirstPrompt bool
+	latest          *staleAttachmentSession
 }
 
 type staleAttachmentSession struct {
 	driver.Session
-	mu    sync.Mutex
-	stale bool
+	mu         sync.Mutex
+	stale      bool
+	failPrompt bool
 }
 
 func (d *staleAttachmentDriver) OpenSession(ctx context.Context, key driver.SessionKey, spec driver.AgentSpec, params driver.OpenParams) (*driver.SessionAttachment, error) {
@@ -252,10 +254,13 @@ func (d *staleAttachmentDriver) OpenSession(ctx context.Context, key driver.Sess
 	if err != nil {
 		return nil, err
 	}
-	wrapped := &staleAttachmentSession{Session: att.Session}
+	d.mu.Lock()
+	failPrompt := d.failFirstPrompt && d.opens == 0
+	d.opens++
+	d.mu.Unlock()
+	wrapped := &staleAttachmentSession{Session: att.Session, failPrompt: failPrompt}
 	att.Session = wrapped
 	d.mu.Lock()
-	d.opens++
 	d.latest = wrapped
 	d.mu.Unlock()
 	return att, nil
@@ -275,6 +280,20 @@ func (s *staleAttachmentSession) markStale() {
 	s.mu.Lock()
 	s.stale = true
 	s.mu.Unlock()
+}
+
+func (s *staleAttachmentSession) Prompt(ctx context.Context, req driver.PromptReq) (driver.RunID, error) {
+	s.mu.Lock()
+	fail := s.failPrompt
+	s.failPrompt = false
+	if fail {
+		s.stale = true
+	}
+	s.mu.Unlock()
+	if fail {
+		return driver.NewRunID(), driver.NewTransportError("forced closed transport")
+	}
+	return s.Session.Prompt(ctx, req)
 }
 
 func (d *recordingSpecDriver) OpenSession(ctx context.Context, key driver.SessionKey, spec driver.AgentSpec, params driver.OpenParams) (*driver.SessionAttachment, error) {
@@ -575,5 +594,31 @@ func TestContinueDropsAClosedBlockedAttachment(t *testing.T) {
 	}
 	if _, err := session.Run(context.Background(), "recover"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestPromptErrorDropsAClosedAttachment(t *testing.T) {
+	fd := fake.New()
+	staleDriver := &staleAttachmentDriver{ProtocolDriver: fd, failFirstPrompt: true}
+	prev := driverOverride
+	driverOverride = func(AgentKind) (driver.ProtocolDriver, bool) { return staleDriver, true }
+	t.Cleanup(func() { driverOverride = prev })
+	agent, err := New(Codex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer agent.Close()
+	session, _ := agent.NewSession(context.Background())
+	if _, err := session.Run(context.Background(), "fails"); err == nil {
+		t.Fatal("first Run unexpectedly succeeded")
+	}
+	if _, err := session.Run(context.Background(), "recovers"); err != nil {
+		t.Fatal(err)
+	}
+	staleDriver.mu.Lock()
+	opens := staleDriver.opens
+	staleDriver.mu.Unlock()
+	if opens != 2 {
+		t.Fatalf("OpenSession calls = %d; want closed attachment replaced", opens)
 	}
 }

@@ -86,10 +86,12 @@ type session struct {
 	resume driver.SessionID
 	bus    *driver.EventBus
 
-	threadID atomic.Pointer[string]
-	turnID   atomic.Pointer[string]
-	curRun   atomic.Pointer[string]
-	state    atomic.Pointer[driver.ProcessState]
+	threadID        atomic.Pointer[string]
+	turnID          atomic.Pointer[string]
+	curRun          atomic.Pointer[string]
+	state           atomic.Pointer[driver.ProcessState]
+	transportClosed atomic.Bool
+	stateMu         sync.Mutex
 	// pendingUsage holds the latest thread/tokenUsage for the in-flight turn,
 	// attached to the Completed event when the turn ends.
 	pendingUsage atomic.Pointer[TurnTokenUsage]
@@ -130,8 +132,17 @@ func (s *session) ProcessState() driver.ProcessState {
 }
 
 func (s *session) setState(st driver.ProcessState) {
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	if st.Phase != driver.PhaseClosed && (s.transportClosed.Load() || s.proc.IsStale()) {
+		st = driver.ProcessState{Phase: driver.PhaseClosed, SessionID: s.SessionID()}
+	}
 	s.state.Store(&st)
 	s.bus.Emit(driver.LifecycleEvent(s.key, st))
+}
+
+func (s *session) transportUnavailable() bool {
+	return s.transportClosed.Load() || s.proc.IsStale()
 }
 
 // Run starts the shared child (if needed) then starts or resumes this thread.
@@ -140,6 +151,10 @@ func (s *session) Run(ctx context.Context, initPrompt *driver.PromptReq) error {
 	if s.closed {
 		s.mu.Unlock()
 		return driver.NewUnsupportedError("codex: session is closed")
+	}
+	if s.transportUnavailable() {
+		s.mu.Unlock()
+		return driver.NewTransportError("codex app-server is closed")
 	}
 	s.setState(driver.ProcessState{Phase: driver.PhaseStarting})
 
@@ -150,7 +165,11 @@ func (s *session) Run(ctx context.Context, initPrompt *driver.PromptReq) error {
 		} else {
 			st.Err = driver.NewTransportError(err.Error())
 		}
-		s.setState(st)
+		if s.transportUnavailable() {
+			s.setState(driver.ProcessState{Phase: driver.PhaseClosed, SessionID: s.SessionID()})
+		} else {
+			s.setState(st)
+		}
 		s.mu.Unlock()
 		return err
 	}
@@ -160,6 +179,11 @@ func (s *session) Run(ctx context.Context, initPrompt *driver.PromptReq) error {
 		s.setState(driver.ProcessState{Phase: driver.PhaseFailed, Err: toAgentErr(err)})
 		s.mu.Unlock()
 		return err
+	}
+	if s.transportUnavailable() {
+		s.setState(driver.ProcessState{Phase: driver.PhaseClosed, SessionID: s.SessionID()})
+		s.mu.Unlock()
+		return driver.NewTransportError("codex app-server closed during thread start")
 	}
 
 	s.threadID.Store(&threadID)
@@ -184,7 +208,10 @@ func (s *session) startOrResumeThread(ctx context.Context) (string, error) {
 			return "", driver.NewSessionNotFoundError(s.resume)
 		}
 		id := s.proc.allocID()
-		ch := s.proc.registerAndSend(id, "thread/resume", BuildThreadResume(id, s.resume, s.spec.SystemPrompt))
+		ch, err := s.proc.registerAndSend(id, "thread/resume", BuildThreadResume(id, s.resume, s.spec.SystemPrompt))
+		if err != nil {
+			return "", err
+		}
 		ev, err := waitResp(ctx, ch, s.proc.closed)
 		if err != nil {
 			return "", err
@@ -201,7 +228,10 @@ func (s *session) startOrResumeThread(ctx context.Context) (string, error) {
 		return ev.ThreadID, nil
 	}
 	id := s.proc.allocID()
-	ch := s.proc.registerAndSend(id, "thread/start", BuildThreadStart(id, s.spec.Model, s.spec.Cwd, s.spec.SystemPrompt))
+	ch, err := s.proc.registerAndSend(id, "thread/start", BuildThreadStart(id, s.spec.Model, s.spec.Cwd, s.spec.SystemPrompt))
+	if err != nil {
+		return "", err
+	}
 	ev, err := waitResp(ctx, ch, s.proc.closed)
 	if err != nil {
 		return "", err
@@ -223,6 +253,9 @@ func (s *session) Prompt(ctx context.Context, req driver.PromptReq) (driver.RunI
 	if s.closed {
 		return "", driver.NewUnsupportedError("codex: session is closed")
 	}
+	if s.transportUnavailable() {
+		return "", driver.NewTransportError("codex app-server is closed")
+	}
 	threadID := s.SessionID()
 	if threadID == "" {
 		return "", driver.NewTransportError("codex: prompt before Run")
@@ -233,9 +266,17 @@ func (s *session) Prompt(ctx context.Context, req driver.PromptReq) (driver.RunI
 	s.turnDone = make(chan struct{})
 	s.doneMu.Unlock()
 	s.setState(driver.ProcessState{Phase: driver.PhasePromptInFlight, SessionID: threadID, RunID: runID})
+	if s.transportUnavailable() {
+		s.clearSubmittedTurn()
+		return runID, driver.NewTransportError("codex app-server closed before prompt submission")
+	}
 
 	id := s.proc.allocID()
-	ch := s.proc.registerAndSend(id, "turn/start", BuildTurnStart(id, threadID, req.Text))
+	ch, sendErr := s.proc.registerAndSend(id, "turn/start", BuildTurnStart(id, threadID, req.Text))
+	if sendErr != nil {
+		s.clearSubmittedTurn()
+		return runID, sendErr
+	}
 	ev, err := waitResp(ctx, ch, s.proc.closed)
 	if err != nil {
 		aerr := toAgentErr(err)
@@ -270,12 +311,18 @@ func (s *session) interruptLocked(ctx context.Context) error {
 	if s.closed {
 		return nil
 	}
+	if s.transportUnavailable() {
+		return driver.NewTransportError("codex app-server is closed")
+	}
 	tp := s.turnID.Load()
 	if tp == nil || *tp == "" {
 		return nil
 	}
 	id := s.proc.allocID()
-	ch := s.proc.registerAndSend(id, "turn/interrupt", BuildTurnInterrupt(id, s.SessionID(), *tp))
+	ch, err := s.proc.registerAndSend(id, "turn/interrupt", BuildTurnInterrupt(id, s.SessionID(), *tp))
+	if err != nil {
+		return err
+	}
 	if _, err := waitResp(ctx, ch, s.proc.closed); err != nil {
 		return toAgentErr(err)
 	}
@@ -337,6 +384,9 @@ func (s *session) Continue(ctx context.Context, input string) (driver.RunID, err
 	if s.closed {
 		return "", driver.NewUnsupportedError("codex: session is closed")
 	}
+	if s.transportUnavailable() {
+		return "", driver.NewTransportError("codex app-server is closed")
+	}
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
@@ -360,7 +410,16 @@ func (s *session) Continue(ctx context.Context, input string) (driver.RunID, err
 	runID := driver.NewRunID()
 	s.curRun.Store(&runID)
 	s.setState(driver.ProcessState{Phase: driver.PhasePromptInFlight, SessionID: s.SessionID(), RunID: runID})
-	s.proc.writeLine(BuildApprovalResponse(block.requestID, decision))
+	if s.transportUnavailable() {
+		s.curRun.Store(ptr(""))
+		return runID, driver.NewTransportError("codex app-server closed before continue")
+	}
+	if err := s.proc.writeLine(BuildApprovalResponse(block.requestID, decision)); err != nil {
+		s.proc.shutdown()
+		s.curRun.Store(ptr(""))
+		s.setState(driver.ProcessState{Phase: driver.PhaseClosed, SessionID: s.SessionID()})
+		return runID, err
+	}
 	return runID, nil
 }
 

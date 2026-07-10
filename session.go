@@ -80,6 +80,15 @@ func (s *Session) Stream(ctx context.Context, prompt string) (*Stream, error) {
 	s.mu.Unlock()
 	runID, err := inner.Prompt(ctx, driver.PromptReq{Text: prompt})
 	if err != nil {
+		if inner.ProcessState().Phase == driver.PhaseClosed {
+			s.mu.Lock()
+			if s.inner == inner {
+				s.inner = nil
+				s.events = nil
+			}
+			s.mu.Unlock()
+			_ = inner.Close(context.Background())
+		}
 		s.setState(Idle)
 		return nil, err
 	}
@@ -204,7 +213,18 @@ func (s *Session) Continue(ctx context.Context, input string) (Result, error) {
 	s.mu.Unlock()
 	runID, err := inner.Continue(ctx, input)
 	if err != nil {
-		s.setState(Blocked)
+		if inner.ProcessState().Phase == driver.PhaseClosed {
+			s.mu.Lock()
+			if s.inner == inner {
+				s.inner = nil
+				s.events = nil
+			}
+			s.mu.Unlock()
+			_ = inner.Close(context.Background())
+			s.setState(Idle)
+		} else {
+			s.setState(Blocked)
+		}
 		s.opMu.Unlock()
 		return Result{}, err
 	}

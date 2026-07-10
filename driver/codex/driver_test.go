@@ -2,12 +2,14 @@ package codex
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"os"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -39,6 +41,33 @@ type scriptedServer struct {
 	killed           chan struct{}
 	waited           chan struct{}
 }
+
+type overlapWriter struct {
+	active     atomic.Int32
+	overlapped atomic.Bool
+	mu         sync.Mutex
+	writes     [][]byte
+}
+
+func (w *overlapWriter) Write(p []byte) (int, error) {
+	if w.active.Add(1) != 1 {
+		w.overlapped.Store(true)
+	}
+	time.Sleep(time.Millisecond)
+	w.mu.Lock()
+	w.writes = append(w.writes, append([]byte(nil), p...))
+	w.mu.Unlock()
+	w.active.Add(-1)
+	return len(p), nil
+}
+
+type writerTransport struct{ w io.Writer }
+
+func (t *writerTransport) stdin() io.Writer       { return t.w }
+func (t *writerTransport) stdout() *bufio.Scanner { return bufio.NewScanner(bytes.NewReader(nil)) }
+func (t *writerTransport) wait() error            { return nil }
+func (t *writerTransport) kill()                  {}
+func (t *writerTransport) errText() string        { return "" }
 
 func newScriptedServer() *scriptedServer {
 	outR, outW := io.Pipe()
@@ -572,6 +601,63 @@ func TestProcessLastReleaseSerializesWithAcquire(t *testing.T) {
 			}
 			p.release(second)
 		}
+	}
+}
+
+func TestProcessSerializesCompleteJSONLines(t *testing.T) {
+	w := &overlapWriter{}
+	p := newProcess("codex", driver.AgentSpec{}, nil, "test")
+	p.tr = &writerTransport{w: w}
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := p.writeLine(`{"method":"turn/start","params":{"text":"payload"}}`); err != nil {
+				t.Errorf("writeLine: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+	if w.overlapped.Load() {
+		t.Fatal("concurrent JSONL writes overlapped")
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if len(w.writes) != 50 {
+		t.Fatalf("writes = %d; want 50", len(w.writes))
+	}
+	for _, line := range w.writes {
+		if len(line) == 0 || line[len(line)-1] != '\n' {
+			t.Fatalf("incomplete JSONL write: %q", line)
+		}
+	}
+}
+
+func TestTransportClosedStateIsMonotonic(t *testing.T) {
+	for i := 0; i < 1000; i++ {
+		p := newProcess("codex", driver.AgentSpec{}, nil, "test")
+		s := &session{key: "state", proc: p, bus: driver.NewEventBus()}
+		s.state.Store(&driver.ProcessState{Phase: driver.PhaseIdle})
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			<-start
+			s.setState(driver.ProcessState{Phase: driver.PhasePromptInFlight})
+		}()
+		go func() {
+			defer wg.Done()
+			<-start
+			s.onTransportClosed()
+		}()
+		close(start)
+		wg.Wait()
+		if s.ProcessState().Phase != driver.PhaseClosed {
+			t.Fatalf("terminal state overwritten by %q", s.ProcessState().Phase)
+		}
+		s.bus.Close()
 	}
 }
 

@@ -93,6 +93,7 @@ func (s *session) finishTurn(run driver.RunID, ev AppServerEvent) {
 // onTransportClosed is called when the shared child's stdout closes; fail any
 // in-flight run.
 func (s *session) onTransportClosed() {
+	s.transportClosed.Store(true)
 	run := s.currentRun()
 	if run != "" {
 		s.bus.Emit(driver.CompletedEvent(s.key, s.SessionID(), run, driver.RunResult{FinishReason: driver.FinishTransportClosed}))
