@@ -9,7 +9,7 @@
 //
 // Usage:
 //
-//	go run ./examples/multi -prompt "reply with one word: hello"
+//	go run ./examples/multi
 package main
 
 import (

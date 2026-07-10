@@ -87,6 +87,8 @@ go test -tags e2e_real ./tests/...
 
 Real E2E tests require installed, authenticated CLIs.
 
+Examples: `examples/basic`, `examples/multi`, `examples/sessions`.
+
 ## License
 
 MIT
