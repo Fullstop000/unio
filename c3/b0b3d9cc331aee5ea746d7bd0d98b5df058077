@@ -1,0 +1,33 @@
+agent_api_test.go
+  s_0b0f8a8fcdf726::t_4d7d6a25582e66 237-279,519-579
+driver/codex/driver.go
+  s_0b0f8a8fcdf726::t_962b0f1e6909f0 68-78,409
+driver/codex/driver_test.go
+  s_0b0f8a8fcdf726::t_49bacefdb6456e 31,117,140-142,509-577
+driver/codex/process.go
+  s_0b0f8a8fcdf726::t_67964ae0bd07e7 108,121-123,143,233-240,245-251,255-256,261-270,357,359,362-366
+driver/codex/reader.go
+  s_0b0f8a8fcdf726::t_ae74f5f625f277 24-26,28-30
+driver/codex/session_events.go
+  s_0b0f8a8fcdf726::t_34a0d854529cb9 101
+session.go
+  s_0b0f8a8fcdf726::t_f3d78d3c2c6591 96-102,104-105,191-202
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "c3b0b3d9cc331aee5ea746d7bd0d98b5df058077",
+  "prompts": {},
+  "sessions": {
+    "s_0b0f8a8fcdf726": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4a17-3b3b-76c1-90ac-be1a039189b7",
+        "model": "unknown"
+      },
+      "human_author": "Fullstop000 <fullstop1005@gmail.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
