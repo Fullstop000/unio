@@ -1,0 +1,23 @@
+docs/superpowers/plans/2026-07-10-agent-session-api.md
+  s_0b0f8a8fcdf726::t_5d5c9e0bcb7913 1-1515
+docs/superpowers/specs/2026-07-10-agent-session-api-design.md
+  s_0b0f8a8fcdf726::t_a59719ad161ee4 70
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "c8dd75c10696b225a0308b1315a2daeb3f8688aa",
+  "prompts": {},
+  "sessions": {
+    "s_0b0f8a8fcdf726": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4a17-3b3b-76c1-90ac-be1a039189b7",
+        "model": "unknown"
+      },
+      "human_author": "Fullstop000 <fullstop1005@gmail.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
