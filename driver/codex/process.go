@@ -105,6 +105,7 @@ type process struct {
 	startErr  error
 	started   atomic.Bool
 	dead      atomic.Bool
+	lifecycle sync.Mutex
 
 	mu     sync.Mutex
 	tr     stdioTransport
@@ -117,9 +118,9 @@ type process struct {
 	sessions map[string]*session
 	// turnToThread maps turnId → threadId (some events carry only turnId).
 	turnToThread map[string]string
-	// leases counts opened session attachments, including sessions that have
-	// started the child but have not yet acquired a runtime thread ID.
-	leases int
+	// attachments includes sessions without a runtime thread ID, so process
+	// death invalidates every facade attachment, not only registered threads.
+	attachments map[*session]struct{}
 
 	closed chan struct{}
 }
@@ -139,6 +140,7 @@ func newProcess(execPath string, spec driver.AgentSpec, factory transportFactory
 		pendingReqs:  make(map[uint64]*pending),
 		sessions:     make(map[string]*session),
 		turnToThread: make(map[string]string),
+		attachments:  make(map[*session]struct{}),
 		closed:       make(chan struct{}),
 	}
 }
@@ -228,26 +230,42 @@ func (p *process) unregisterSession(threadID string) {
 	p.mu.Unlock()
 }
 
-func (p *process) acquire() {
-	p.mu.Lock()
-	p.leases++
-	p.mu.Unlock()
+func (p *process) acquire(s *session) bool {
+	p.lifecycle.Lock()
+	defer p.lifecycle.Unlock()
+	if p.dead.Load() {
+		return false
+	}
+	p.attachments[s] = struct{}{}
+	return true
 }
 
 // release drops one attachment lease. It shuts down the child when the last
 // attachment goes away and reports whether the caller must await p.closed.
-func (p *process) release() bool {
+func (p *process) release(s *session) bool {
+	p.lifecycle.Lock()
+	delete(p.attachments, s)
+	last := len(p.attachments) == 0
+	shouldKill := last && !p.dead.Swap(true)
+	p.lifecycle.Unlock()
+
 	p.mu.Lock()
-	if p.leases > 0 {
-		p.leases--
-	}
-	last := p.leases == 0
 	hasTransport := p.tr != nil
 	p.mu.Unlock()
-	if last {
-		p.shutdown()
+	if shouldKill && hasTransport {
+		p.killTransport()
 	}
 	return last && hasTransport
+}
+
+func (p *process) attachedSessions() []*session {
+	p.lifecycle.Lock()
+	defer p.lifecycle.Unlock()
+	out := make([]*session, 0, len(p.attachments))
+	for s := range p.attachments {
+		out = append(out, s)
+	}
+	return out
 }
 
 func (p *process) sessionForThread(threadID string) *session {
@@ -336,9 +354,16 @@ func (b *boundedBuffer) String() string {
 
 // shutdown kills the child and marks the process stale.
 func (p *process) shutdown() {
+	p.lifecycle.Lock()
 	if p.dead.Swap(true) {
+		p.lifecycle.Unlock()
 		return
 	}
+	p.lifecycle.Unlock()
+	p.killTransport()
+}
+
+func (p *process) killTransport() {
 	p.mu.Lock()
 	tr := p.tr
 	p.mu.Unlock()

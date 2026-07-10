@@ -28,6 +28,7 @@ type scriptedServer struct {
 	turnSeq          int
 	omitThreadID     bool
 	omitTurnIDResp   bool
+	omitTurnStarted  bool
 	requestApproval  bool
 	approvalDecision string
 	activeTurnID     string
@@ -113,6 +114,7 @@ func (s *scriptedServer) loop() {
 			turnID := "turn-" + string(rune('a'+s.turnSeq-1))
 			omitThreadID := s.omitThreadID
 			omitTurnIDResp := s.omitTurnIDResp
+			omitTurnStarted := s.omitTurnStarted
 			s.mu.Unlock()
 			s.mu.Lock()
 			s.activeTurnID = turnID
@@ -135,7 +137,9 @@ func (s *scriptedServer) loop() {
 				usageParams["threadId"] = s.threadID
 				doneParams["threadId"] = s.threadID
 			}
-			s.send(map[string]any{"method": "turn/started", "params": startedParams})
+			if !omitTurnStarted {
+				s.send(map[string]any{"method": "turn/started", "params": startedParams})
+			}
 			if requestApproval {
 				s.send(map[string]any{"id": 42, "method": "item/commandExecution/requestApproval", "params": map[string]any{"threadId": s.threadID, "turnId": turnID, "itemId": "cmd-1"}})
 				continue
@@ -499,6 +503,75 @@ func TestCodexPromptCancellationWaitsForConfirmedInterrupt(t *testing.T) {
 	case <-srv.interruptSeen:
 	case <-time.After(time.Second):
 		t.Fatal("cancelled Prompt did not send turn/interrupt")
+	}
+}
+
+func TestCodexForcedCancellationInvalidatesIdleSibling(t *testing.T) {
+	srv := newScriptedServer()
+	srv.holdTurn = true
+	srv.omitTurnIDResp = true
+	srv.omitTurnStarted = true
+	srv.turnStartSeen = make(chan struct{})
+	srv.turnStartGate = make(chan struct{})
+	d := newWithTransport(func(context.Context, string, driver.AgentSpec) (stdioTransport, error) { return srv, nil })
+	active, err := d.OpenSession(context.Background(), "active", driver.AgentSpec{ExecutablePath: fakeCodex(t)}, driver.OpenParams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	idle, err := d.OpenSession(context.Background(), "idle", driver.AgentSpec{ExecutablePath: fakeCodex(t)}, driver.OpenParams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer active.Session.Close(context.Background())
+	defer idle.Session.Close(context.Background())
+	if err := active.Session.Run(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := active.Session.Prompt(ctx, driver.PromptReq{Text: "long"})
+		done <- err
+	}()
+	<-srv.turnStartSeen
+	cancel()
+	time.Sleep(20 * time.Millisecond)
+	close(srv.turnStartGate)
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("Prompt error = %v; want context.Canceled", err)
+	}
+	if idle.Session.ProcessState().Phase != driver.PhaseClosed {
+		t.Fatalf("idle sibling phase = %q; want closed", idle.Session.ProcessState().Phase)
+	}
+	select {
+	case <-srv.waited:
+	case <-time.After(time.Second):
+		t.Fatal("forced cancellation returned before process reaping")
+	}
+}
+
+func TestProcessLastReleaseSerializesWithAcquire(t *testing.T) {
+	for i := 0; i < 1000; i++ {
+		p := newProcess("codex", driver.AgentSpec{}, nil, "test")
+		first := &session{}
+		second := &session{}
+		if !p.acquire(first) {
+			t.Fatal("initial acquire failed")
+		}
+		start := make(chan struct{})
+		acquired := make(chan bool, 1)
+		go func() {
+			<-start
+			acquired <- p.acquire(second)
+		}()
+		close(start)
+		p.release(first)
+		if ok := <-acquired; ok {
+			if p.IsStale() {
+				t.Fatal("process became stale after accepting a concurrent attachment")
+			}
+			p.release(second)
+		}
 	}
 }
 

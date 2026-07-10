@@ -234,6 +234,49 @@ type recordingSpecDriver struct {
 	spec driver.AgentSpec
 }
 
+type staleAttachmentDriver struct {
+	driver.ProtocolDriver
+	mu     sync.Mutex
+	opens  int
+	latest *staleAttachmentSession
+}
+
+type staleAttachmentSession struct {
+	driver.Session
+	mu    sync.Mutex
+	stale bool
+}
+
+func (d *staleAttachmentDriver) OpenSession(ctx context.Context, key driver.SessionKey, spec driver.AgentSpec, params driver.OpenParams) (*driver.SessionAttachment, error) {
+	att, err := d.ProtocolDriver.OpenSession(ctx, key, spec, params)
+	if err != nil {
+		return nil, err
+	}
+	wrapped := &staleAttachmentSession{Session: att.Session}
+	att.Session = wrapped
+	d.mu.Lock()
+	d.opens++
+	d.latest = wrapped
+	d.mu.Unlock()
+	return att, nil
+}
+
+func (s *staleAttachmentSession) ProcessState() driver.ProcessState {
+	s.mu.Lock()
+	stale := s.stale
+	s.mu.Unlock()
+	if stale {
+		return driver.ProcessState{Phase: driver.PhaseClosed, SessionID: s.SessionID()}
+	}
+	return s.Session.ProcessState()
+}
+
+func (s *staleAttachmentSession) markStale() {
+	s.mu.Lock()
+	s.stale = true
+	s.mu.Unlock()
+}
+
 func (d *recordingSpecDriver) OpenSession(ctx context.Context, key driver.SessionKey, spec driver.AgentSpec, params driver.OpenParams) (*driver.SessionAttachment, error) {
 	d.mu.Lock()
 	d.spec = spec
@@ -471,5 +514,66 @@ func TestGetSessionUsesPersistedCwdForResume(t *testing.T) {
 	recording.mu.Unlock()
 	if cwd != "/other/repo" {
 		t.Fatalf("resume cwd = %q; want persisted cwd", cwd)
+	}
+}
+
+func TestRunReattachesAClosedDriverSession(t *testing.T) {
+	fd := fake.New()
+	staleDriver := &staleAttachmentDriver{ProtocolDriver: fd}
+	prev := driverOverride
+	driverOverride = func(AgentKind) (driver.ProtocolDriver, bool) { return staleDriver, true }
+	t.Cleanup(func() { driverOverride = prev })
+	agent, err := New(Codex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer agent.Close()
+	session, _ := agent.NewSession(context.Background())
+	if _, err := session.Run(context.Background(), "first"); err != nil {
+		t.Fatal(err)
+	}
+	staleDriver.mu.Lock()
+	first := staleDriver.latest
+	staleDriver.mu.Unlock()
+	first.markStale()
+	if _, err := session.Run(context.Background(), "second"); err != nil {
+		t.Fatal(err)
+	}
+	staleDriver.mu.Lock()
+	opens := staleDriver.opens
+	staleDriver.mu.Unlock()
+	if opens != 2 {
+		t.Fatalf("OpenSession calls = %d; want 2 after stale attachment", opens)
+	}
+}
+
+func TestContinueDropsAClosedBlockedAttachment(t *testing.T) {
+	fd := fake.New()
+	staleDriver := &staleAttachmentDriver{ProtocolDriver: fd}
+	prev := driverOverride
+	driverOverride = func(AgentKind) (driver.ProtocolDriver, bool) { return staleDriver, true }
+	t.Cleanup(func() { driverOverride = prev })
+	agent, err := New(Codex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer agent.Close()
+	session, _ := agent.NewSession(context.Background())
+	fd.ScriptSession(session.key, fake.Script{Blocked: &driver.BlockedReason{Kind: driver.BlockedToolApproval}})
+	if result, err := session.Run(context.Background(), "block"); err != nil || result.Blocked == nil {
+		t.Fatalf("blocked result=%+v err=%v", result, err)
+	}
+	staleDriver.mu.Lock()
+	first := staleDriver.latest
+	staleDriver.mu.Unlock()
+	first.markStale()
+	if _, err := session.Continue(context.Background(), "allow_once"); err == nil {
+		t.Fatal("Continue accepted a closed blocked attachment")
+	}
+	if session.State() != Idle {
+		t.Fatalf("state after stale Continue = %q; want idle", session.State())
+	}
+	if _, err := session.Run(context.Background(), "recover"); err != nil {
+		t.Fatal(err)
 	}
 }

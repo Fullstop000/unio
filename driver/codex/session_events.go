@@ -98,6 +98,7 @@ func (s *session) onTransportClosed() {
 		s.bus.Emit(driver.CompletedEvent(s.key, s.SessionID(), run, driver.RunResult{FinishReason: driver.FinishTransportClosed}))
 		s.curRun.Store(ptr(""))
 	}
+	s.setState(driver.ProcessState{Phase: driver.PhaseClosed, SessionID: s.SessionID()})
 }
 
 func (s *session) emit(run driver.RunID, item driver.AgentEventItem) {

@@ -13,7 +13,6 @@ func (p *process) readerLoop() {
 	tr := p.tr
 	p.mu.Unlock()
 	defer close(p.closed)
-	defer p.dead.Store(true)
 
 	sc := tr.stdout()
 	for sc.Scan() {
@@ -22,15 +21,13 @@ func (p *process) readerLoop() {
 	// Reap the shared app-server before p.closed is closed. The last session's
 	// Close waits on p.closed, so it cannot leave a zombie child behind.
 	_ = tr.wait()
+	p.lifecycle.Lock()
+	p.dead.Store(true)
+	p.lifecycle.Unlock()
 
-	// stdout closed: fail any session with a turn in flight.
-	p.mu.Lock()
-	sessions := make([]*session, 0, len(p.sessions))
-	for _, s := range p.sessions {
-		sessions = append(sessions, s)
-	}
-	p.mu.Unlock()
-	for _, s := range sessions {
+	// stdout closed: invalidate every attachment, including idle sessions and
+	// sessions whose thread registration never completed.
+	for _, s := range p.attachedSessions() {
 		s.onTransportClosed()
 	}
 }

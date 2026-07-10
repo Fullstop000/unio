@@ -93,8 +93,16 @@ func (s *Session) Stream(ctx context.Context, prompt string) (*Stream, error) {
 func (s *Session) ensureAttached(ctx context.Context) error {
 	s.mu.Lock()
 	if s.inner != nil {
+		if s.inner.ProcessState().Phase != driver.PhaseClosed {
+			s.mu.Unlock()
+			return nil
+		}
+		stale := s.inner
+		s.inner = nil
+		s.events = nil
 		s.mu.Unlock()
-		return nil
+		_ = stale.Close(context.Background())
+		s.mu.Lock()
 	}
 	resumeID := s.id
 	s.mu.Unlock()
@@ -179,8 +187,19 @@ func (s *Session) Continue(ctx context.Context, input string) (Result, error) {
 		s.opMu.Unlock()
 		return Result{}, errs.InvalidState("continue requires a blocked session")
 	}
-	s.state = Running
 	inner := s.inner
+	if inner == nil || inner.ProcessState().Phase == driver.PhaseClosed {
+		s.inner = nil
+		s.events = nil
+		s.state = Idle
+		s.mu.Unlock()
+		s.opMu.Unlock()
+		if inner != nil {
+			_ = inner.Close(context.Background())
+		}
+		return Result{}, driver.NewTransportError("agent transport closed while blocked")
+	}
+	s.state = Running
 	events := s.events
 	s.mu.Unlock()
 	runID, err := inner.Continue(ctx, input)

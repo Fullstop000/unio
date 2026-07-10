@@ -60,28 +60,22 @@ func (d *Driver) OpenSession(ctx context.Context, key driver.SessionKey, spec dr
 		return nil, aerr
 	}
 
-	proc := d.getProcess(execPath, spec)
-
 	bus := driver.NewEventBus()
-	s := &session{
-		key:    key,
-		spec:   spec,
-		proc:   proc,
-		resume: params.ResumeSessionID,
-		bus:    bus,
-	}
-	s.state.Store(&driver.ProcessState{Phase: driver.PhaseIdle})
-	return &driver.SessionAttachment{Session: s, Events: bus}, nil
-}
-
-func (d *Driver) getProcess(execPath string, spec driver.AgentSpec) *process {
 	d.mu.Lock()
-	defer d.mu.Unlock()
 	if d.process == nil || d.process.IsStale() {
 		d.process = newProcess(execPath, spec, d.factory, clientVersion)
 	}
-	d.process.acquire()
-	return d.process
+	proc := d.process
+	s := &session{key: key, spec: spec, proc: proc, resume: params.ResumeSessionID, bus: bus}
+	if !proc.acquire(s) {
+		proc = newProcess(execPath, spec, d.factory, clientVersion)
+		d.process = proc
+		s.proc = proc
+		_ = proc.acquire(s)
+	}
+	d.mu.Unlock()
+	s.state.Store(&driver.ProcessState{Phase: driver.PhaseIdle})
+	return &driver.SessionAttachment{Session: s, Events: bus}, nil
 }
 
 // session is one codex thread. Implements driver.Session.
@@ -412,7 +406,7 @@ func (s *session) Close(ctx context.Context) error {
 	if tid := s.SessionID(); tid != "" {
 		s.proc.unregisterSession(tid)
 	}
-	wait := s.proc.release()
+	wait := s.proc.release(s)
 	s.setState(driver.ProcessState{Phase: driver.PhaseClosed, SessionID: s.SessionID()})
 	s.bus.Close()
 	if wait {
