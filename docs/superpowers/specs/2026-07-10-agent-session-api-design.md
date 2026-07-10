@@ -67,7 +67,7 @@ The intended public surface is:
 ```go
 func New(kind AgentKind, opts ...Option) (*Agent, error)
 
-func (a *Agent) NewSession(ctx context.Context, opts ...SessionOption) (*Session, error)
+func (a *Agent) NewSession(ctx context.Context) (*Session, error)
 func (a *Agent) ListSessions(ctx context.Context) ([]SessionInfo, error)
 func (a *Agent) GetSession(ctx context.Context, id string) (*Session, error)
 func (a *Agent) Close() error
