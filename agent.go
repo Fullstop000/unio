@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 
 	"github.com/Fullstop000/unio/driver"
 	"github.com/Fullstop000/unio/errs"
@@ -19,7 +20,7 @@ type Agent struct {
 	mu       sync.Mutex
 	sessions map[string]*Session
 	pending  map[*Session]struct{}
-	closed   bool
+	closed   atomic.Bool
 }
 
 // New initializes an agent runtime. A successful return means its CLI is
@@ -53,7 +54,7 @@ func (a *Agent) NewSession(ctx context.Context) (*Session, error) {
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.closed {
+	if a.closed.Load() {
 		return nil, errs.InvalidState("agent is closed")
 	}
 	s := newSession(a, "", "")
@@ -64,12 +65,9 @@ func (a *Agent) NewSession(ctx context.Context) (*Session, error) {
 // ListSessions lists conversations known to the runtime. Maintained live
 // handles are included even when runtime history has not reached disk yet.
 func (a *Agent) ListSessions(ctx context.Context) ([]SessionInfo, error) {
-	a.mu.Lock()
-	if a.closed {
-		a.mu.Unlock()
+	if a.closed.Load() {
 		return nil, errs.InvalidState("agent is closed")
 	}
-	a.mu.Unlock()
 	stored, err := a.driver.ListSessions(ctx)
 	if err != nil {
 		return nil, err
@@ -96,11 +94,10 @@ func (a *Agent) GetSession(ctx context.Context, id string) (*Session, error) {
 	if id == "" {
 		return nil, errs.SessionNotFound(id)
 	}
-	a.mu.Lock()
-	if a.closed {
-		a.mu.Unlock()
+	if a.closed.Load() {
 		return nil, errs.InvalidState("agent is closed")
 	}
+	a.mu.Lock()
 	if existing := a.sessions[id]; existing != nil {
 		a.mu.Unlock()
 		return existing, nil
@@ -124,7 +121,7 @@ func (a *Agent) GetSession(ctx context.Context, id string) (*Session, error) {
 	candidate := newSession(a, id, matched.Cwd)
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.closed {
+	if a.closed.Load() {
 		return nil, errs.InvalidState("agent is closed")
 	}
 	if existing := a.sessions[id]; existing != nil {
@@ -155,20 +152,12 @@ func (a *Agent) register(s *Session, id string) error {
 	return nil
 }
 
-func (a *Agent) isClosed() bool {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.closed
-}
-
 // Close releases every runtime process and goroutine owned by this Agent.
 func (a *Agent) Close() error {
-	a.mu.Lock()
-	if a.closed {
-		a.mu.Unlock()
+	if !a.closed.CompareAndSwap(false, true) {
 		return nil
 	}
-	a.closed = true
+	a.mu.Lock()
 	all := make([]*Session, 0, len(a.sessions)+len(a.pending))
 	for _, s := range a.sessions {
 		all = append(all, s)
