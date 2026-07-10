@@ -158,26 +158,24 @@ var sessionSeq atomic.Uint64
 
 var driverOverride func(AgentKind) (driver.ProtocolDriver, bool)
 
+var driverFactories = map[AgentKind]func() driver.ProtocolDriver{
+	Claude:   func() driver.ProtocolDriver { return claudedrv.New() },
+	Codex:    func() driver.ProtocolDriver { return codexdrv.New() },
+	Kimi:     func() driver.ProtocolDriver { return acpdrv.New(acpdrv.Kimi) },
+	TraeX:    func() driver.ProtocolDriver { return acpdrv.New(acpdrv.TraeX) },
+	OpenCode: func() driver.ProtocolDriver { return acpdrv.New(acpdrv.OpenCode) },
+}
+
 func driverFor(kind AgentKind) (driver.ProtocolDriver, error) {
 	if driverOverride != nil {
 		if d, ok := driverOverride(kind); ok {
 			return d, nil
 		}
 	}
-	switch kind {
-	case Claude:
-		return claudedrv.New(), nil
-	case Codex:
-		return codexdrv.New(), nil
-	case Kimi:
-		return acpdrv.New(acpdrv.Kimi), nil
-	case TraeX:
-		return acpdrv.New(acpdrv.TraeX), nil
-	case OpenCode:
-		return acpdrv.New(acpdrv.OpenCode), nil
-	default:
-		return nil, fmt.Errorf("unio: unknown agent %q", kind)
+	if factory := driverFactories[kind]; factory != nil {
+		return factory(), nil
 	}
+	return nil, fmt.Errorf("unio: unknown agent %q", kind)
 }
 
 func buildConfig(opts []Option) config {
