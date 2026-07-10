@@ -14,14 +14,13 @@ type Session struct {
 	key   driver.SessionKey
 	opMu  sync.Mutex
 
-	mu            sync.Mutex
-	state         SessionState
-	id            string
-	cwd           string
-	inner         driver.Session
-	events        <-chan driver.AgentEvent
-	active        *Stream
-	closedByAgent bool
+	mu     sync.Mutex
+	state  SessionState
+	id     string
+	cwd    string // immutable after the handle is published
+	inner  driver.Session
+	events <-chan driver.AgentEvent
+	active *Stream
 }
 
 func newSession(agent *Agent, id, cwd string) *Session {
@@ -58,7 +57,7 @@ func (s *Session) Stream(ctx context.Context, prompt string) (*Stream, error) {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
 	s.mu.Lock()
-	if s.closedByAgent || s.agent.closed.Load() {
+	if s.agent.closed.Load() {
 		s.mu.Unlock()
 		return nil, errs.InvalidState("agent is closed")
 	}
@@ -130,7 +129,7 @@ func (s *Session) ensureAttached(ctx context.Context) error {
 		return err
 	}
 	s.mu.Lock()
-	if s.closedByAgent || s.agent.closed.Load() {
+	if s.agent.closed.Load() {
 		s.mu.Unlock()
 		_ = att.Session.Close(context.Background())
 		return errs.InvalidState("agent is closed")
@@ -186,7 +185,7 @@ func (s *Session) Interrupt(ctx context.Context) error {
 func (s *Session) Continue(ctx context.Context, input string) (Result, error) {
 	s.opMu.Lock()
 	s.mu.Lock()
-	if s.closedByAgent || s.agent.closed.Load() {
+	if s.agent.closed.Load() {
 		s.mu.Unlock()
 		s.opMu.Unlock()
 		return Result{}, errs.InvalidState("agent is closed")
@@ -264,7 +263,6 @@ func (s *Session) closeAttachment(ctx context.Context) error {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
 	s.mu.Lock()
-	s.closedByAgent = true
 	inner := s.inner
 	s.inner = nil
 	s.events = nil
