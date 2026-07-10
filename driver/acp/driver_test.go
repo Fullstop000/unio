@@ -39,8 +39,11 @@ func TestDriverBasicsAndRuntimeConfiguration(t *testing.T) {
 	if got := configFor(Kimi).buildArgs(driver.AgentSpec{Cwd: "/repo", Model: "m", ExtraArgs: []string{"--x"}}); !slices.Equal(got, []string{"--work-dir", "/repo", "--model", "m", "--x", "acp"}) {
 		t.Fatalf("kimi args = %v", got)
 	}
-	if got := configFor(OpenCode).buildArgs(driver.AgentSpec{Cwd: "/repo", ExtraArgs: []string{"--pure"}}); !slices.Equal(got, []string{"acp", "--cwd", "/repo", "--pure"}) {
+	if got := configFor(OpenCode).buildArgs(driver.AgentSpec{Cwd: "/repo", Model: "deepseek/deepseek-v4-flash", ExtraArgs: []string{"--pure"}}); !slices.Equal(got, []string{"acp", "--cwd", "/repo", "--pure"}) {
 		t.Fatalf("opencode args = %v", got)
+	}
+	if configFor(OpenCode).modelConfig != "model" {
+		t.Fatal("opencode model config is not declared")
 	}
 	if got := configFor(TraeX).buildArgs(driver.AgentSpec{Model: "m"}); !slices.Equal(got, []string{"--model", "m", "acp", "serve"}) {
 		t.Fatalf("traex args = %v", got)
@@ -69,6 +72,45 @@ func TestDriverBasicsAndRuntimeConfiguration(t *testing.T) {
 	}
 	if len(mergeEnv([]string{"UNIO_ACP_TEST=1"})) == 0 {
 		t.Fatal("merged environment is empty")
+	}
+}
+
+func TestOpenCodeSetsModelViaSessionConfig(t *testing.T) {
+	var selected string
+	d := newWithTransport(OpenCode, scriptedFactory(t, func(msg map[string]json.RawMessage, send func(any)) {
+		switch rawString(msg["method"]) {
+		case "initialize":
+			send(response(msg["id"], map[string]any{"protocolVersion": 1, "agentCapabilities": map[string]any{}}))
+		case "session/new":
+			send(response(msg["id"], map[string]any{"sessionId": "s1"}))
+		case "session/set_config_option":
+			var params struct {
+				SessionID string `json:"sessionId"`
+				ConfigID  string `json:"configId"`
+				Value     string `json:"value"`
+			}
+			_ = json.Unmarshal(msg["params"], &params)
+			if params.SessionID != "s1" || params.ConfigID != "model" {
+				t.Errorf("model params = %+v", params)
+			}
+			selected = params.Value
+			send(response(msg["id"], map[string]any{"configOptions": []any{}}))
+		}
+	}))
+	spec := testAgentSpec()
+	spec.Model = "deepseek/deepseek-v4-flash"
+	att, err := d.OpenSession(context.Background(), "key", spec, driver.OpenParams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := att.Session.Run(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if selected != spec.Model {
+		t.Fatalf("selected model = %q", selected)
+	}
+	if err := att.Session.Close(context.Background()); err != nil {
+		t.Fatal(err)
 	}
 }
 

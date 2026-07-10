@@ -130,6 +130,16 @@ func (s *session) Run(ctx context.Context, initPrompt *driver.PromptReq) error {
 		return driver.NewProtocolError("acp: session/new returned no sessionId")
 	}
 	id := response.SessionID
+	if s.spec.Model != "" && s.proc.cfg.modelConfig != "" {
+		if _, err := s.proc.call(ctx, "session/set_config_option", map[string]any{
+			"sessionId": id,
+			"configId":  s.proc.cfg.modelConfig,
+			"value":     s.spec.Model,
+		}); err != nil {
+			s.opMu.Unlock()
+			return err
+		}
+	}
 	s.sessionID.Store(&id)
 	s.proc.registerSession(id, s)
 	s.bus.Emit(driver.SessionAttachedEvent(s.key, id))
