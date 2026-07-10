@@ -1,0 +1,33 @@
+agent.go
+  s_0b0f8a8fcdf726::t_5e8b1140a74921 1-108
+agent_api_test.go
+  s_0b0f8a8fcdf726::t_c567a6a149d5c5 5,13,16,18,22-23,26-29,31-33,37-38,42-45,49-50,54-59,63-64,66,69-70,73,75,77,79-81
+examples/basic/main.go
+  s_0b0f8a8fcdf726::t_9bce480f0d92a9 20-29,35
+examples/multi/main.go
+  s_0b0f8a8fcdf726::t_5b21538efe42b1 25,34,42,44-55,69
+facade.go
+  s_0b0f8a8fcdf726::t_9e00759e28dcd3 1,12,15-16,19-20,23-44,48-50,54-60,62-82,93,96,98-100,110,112,114,118,124,142-143,147-148,157-163
+session.go
+  s_0b0f8a8fcdf726::t_e68ee55531cbca 11-22,25-27,29-35,38-47,49-70,73-77,79,82-86,89-118,121-123,125,127,129,131-132,134-135,137-138,141-158,160,162,165-171,174-181,184-192,194
+stream.go
+  s_0b0f8a8fcdf726::t_13a363bd192e9b 5-6,11-17,19-25,28-29,32-34,39,41,44-51,56-59,62-79,82-94,101-102,104-106,108,111,114,116,118,120,123-124,127-130
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "e2925a64ee04949dece97260c20c26460db3993e",
+  "prompts": {},
+  "sessions": {
+    "s_0b0f8a8fcdf726": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4a17-3b3b-76c1-90ac-be1a039189b7",
+        "model": "unknown"
+      },
+      "human_author": "Fullstop000 <fullstop1005@gmail.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
