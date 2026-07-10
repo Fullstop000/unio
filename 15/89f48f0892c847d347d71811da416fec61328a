@@ -1,0 +1,21 @@
+driver/acp/driver_test.go
+  s_0b0f8a8fcdf726::t_c14856d5ae4bbf 26-29,108,123,184,206,248,295,341,369,408,458
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "1589f48f0892c847d347d71811da416fec61328a",
+  "prompts": {},
+  "sessions": {
+    "s_0b0f8a8fcdf726": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4a17-3b3b-76c1-90ac-be1a039189b7",
+        "model": "unknown"
+      },
+      "human_author": "Fullstop000 <fullstop1005@gmail.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
