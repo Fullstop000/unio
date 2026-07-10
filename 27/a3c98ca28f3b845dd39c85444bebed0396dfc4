@@ -1,0 +1,63 @@
+README.md
+  s_0b0f8a8fcdf726::t_0e6e9a72bcba5a 3-8,96-99
+SPEC.md
+  s_0b0f8a8fcdf726::t_32f4bf3ce62f0c 72,82-86
+agent.go
+  s_0b0f8a8fcdf726::t_bcdb7653db81ab 60,65-69,73-79,90-93,95,118
+agent_api_test.go
+  s_0b0f8a8fcdf726::t_2f43d16c831e55 16-19,24,91-102,106,128-182
+driver/acp/config.go
+  s_0b0f8a8fcdf726::t_e30606e64553b0 1-102
+driver/acp/driver.go
+  s_0b0f8a8fcdf726::t_48435065233950 1-114
+driver/acp/driver_test.go
+  s_0b0f8a8fcdf726::t_eab306f73f8c63 1-557
+driver/acp/process.go
+  s_0b0f8a8fcdf726::t_04140a29d393b2 1-364
+driver/acp/protocol.go
+  s_0b0f8a8fcdf726::t_f00392dcdc65b0 1-103
+driver/acp/session.go
+  s_0b0f8a8fcdf726::t_355a7ab26a3ce1 1-552
+driver/acp/transport.go
+  s_0b0f8a8fcdf726::t_fb0559e8e46534 1-100
+driver/claude/driver.go
+  s_0b0f8a8fcdf726::t_8a2fc6dc16c132 44-45
+driver/claude/sessions.go
+  s_0b0f8a8fcdf726::t_61c3fcbb911483 25,45
+driver/claude/sessions_test.go
+  s_0b0f8a8fcdf726::t_6f401d8f1ba4c6 8-9,25-28,33,40-43
+driver/codex/driver.go
+  s_0b0f8a8fcdf726::t_2bc7a73331e001 48-49
+driver/codex/sessions.go
+  s_0b0f8a8fcdf726::t_a9f8e1582fc67c 26,46
+driver/codex/sessions_test.go
+  s_0b0f8a8fcdf726::t_67fca80d7dd4f1 8-9,25-28,33,40-43
+driver/driver.go
+  s_0b0f8a8fcdf726::t_d01bfa04e101cd 227-236,307-308
+driver/fake/fake.go
+  s_0b0f8a8fcdf726::t_690abe4734594f 11,97,100-105
+driver/fake/fake_test.go
+  s_0b0f8a8fcdf726::t_0426eeef324a89 258-262
+facade.go
+  s_0b0f8a8fcdf726::t_140808ee5699ef 7,12,22,24-31,101-128,172-177,191-208
+tests/real_acp_test.go
+  s_0b0f8a8fcdf726::t_13a1fe53e5ad07 1-211
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "27a3c98ca28f3b845dd39c85444bebed0396dfc4",
+  "prompts": {},
+  "sessions": {
+    "s_0b0f8a8fcdf726": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4a17-3b3b-76c1-90ac-be1a039189b7",
+        "model": "unknown"
+      },
+      "human_author": "Fullstop000 <fullstop1005@gmail.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
