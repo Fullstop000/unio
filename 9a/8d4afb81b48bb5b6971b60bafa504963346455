@@ -1,0 +1,21 @@
+docs/superpowers/specs/2026-07-10-agent-session-api-design.md
+  s_0b0f8a8fcdf726::t_e654e755d3d202 75-77,130-137,315
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "9a8d4afb81b48bb5b6971b60bafa504963346455",
+  "prompts": {},
+  "sessions": {
+    "s_0b0f8a8fcdf726": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4a17-3b3b-76c1-90ac-be1a039189b7",
+        "model": "unknown"
+      },
+      "human_author": "Fullstop000 <fullstop1005@gmail.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
