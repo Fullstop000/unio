@@ -315,6 +315,22 @@ func TestCodexOpenSessionNotInstalled(t *testing.T) {
 	}
 }
 
+func TestDriverSharesProcessAcrossSessionKeys(t *testing.T) {
+	d := New()
+	spec := driver.AgentSpec{ExecutablePath: fakeCodex(t)}
+	first, err := d.OpenSession(context.Background(), "key-1", spec, driver.OpenParams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := d.OpenSession(context.Background(), "key-2", spec, driver.OpenParams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Session.(*session).proc != second.Session.(*session).proc {
+		t.Fatal("one driver instance must share one app-server process")
+	}
+}
+
 // fakeCodex creates a dummy `codex` on PATH so OpenSession's ResolveExecutable
 // passes for injected-transport tests.
 func fakeCodex(t *testing.T) string {

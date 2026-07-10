@@ -16,17 +16,18 @@ const clientVersion = "0.1.0"
 // Driver implements driver.ProtocolDriver for Codex app-server. One shared child
 // per agent key multiplexes threads; the registry caches it and evicts on death.
 type Driver struct {
-	registry *driver.Registry[*process]
-	factory  transportFactory
+	mu      sync.Mutex
+	process *process
+	factory transportFactory
 }
 
 // New constructs a Codex driver using the real app-server transport.
 func New() *Driver {
-	return &Driver{registry: driver.NewRegistry[*process](), factory: spawnProcTransport}
+	return &Driver{factory: spawnProcTransport}
 }
 
 func newWithTransport(f transportFactory) *Driver {
-	return &Driver{registry: driver.NewRegistry[*process](), factory: f}
+	return &Driver{factory: f}
 }
 
 // Transport implements driver.ProtocolDriver.
@@ -56,10 +57,7 @@ func (d *Driver) OpenSession(ctx context.Context, key driver.SessionKey, spec dr
 		return nil, aerr
 	}
 
-	agentKey := key
-	proc := d.registry.GetOrInit(agentKey, func() *process {
-		return newProcess(execPath, spec, d.factory, clientVersion)
-	})
+	proc := d.getProcess(execPath, spec)
 
 	bus := driver.NewEventBus()
 	s := &session{
@@ -71,6 +69,15 @@ func (d *Driver) OpenSession(ctx context.Context, key driver.SessionKey, spec dr
 	}
 	s.state.Store(&driver.ProcessState{Phase: driver.PhaseIdle})
 	return &driver.SessionAttachment{Session: s, Events: bus}, nil
+}
+
+func (d *Driver) getProcess(execPath string, spec driver.AgentSpec) *process {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.process == nil || d.process.IsStale() {
+		d.process = newProcess(execPath, spec, d.factory, clientVersion)
+	}
+	return d.process
 }
 
 // session is one codex thread. Implements driver.Session.
