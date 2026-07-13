@@ -1,0 +1,27 @@
+docs/API_SUPPORT.md
+  s_603ee6dacfd6ff::t_f8d43a2093d6c7 3,5,7,9-10,15,17-19,21,23,25-30,32,34,36-41,43,45,47-52,54,56,58-60,62,64,66-69,71,73,75-86,88-92,94,96,98-103,105,107,109-121
+docs/GENERATION.md
+  s_603ee6dacfd6ff::t_5215bd9cf18493 1,7,17,19-23
+internal/supportmatrix/matrix.go
+  s_603ee6dacfd6ff::t_b0ce92e26e33be 6,92-98,100-106,108-114,116-119,121-125,127-135,137-142,144-150,152-157,222-223,226,233-240,270-271,280,302,307-311,328,331,336,338,380
+tests/support_matrix_e2e_test.go
+  s_603ee6dacfd6ff::t_d492f8de74a495 47-48,54,57-66
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "95db7a74120d664151b15ccbe0759c64abad3425",
+  "prompts": {},
+  "sessions": {
+    "s_603ee6dacfd6ff": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4b1f-b12a-75c1-af02-0c3edd4900ad",
+        "model": "unknown"
+      },
+      "human_author": "Fullstop000 <fullstop1005@gmail.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
