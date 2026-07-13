@@ -1,10 +1,10 @@
-# 代码生成
+# Code Generation
 
 ```sh
 go generate ./...
 ```
 
-能力矩阵生成链路：
+Support-matrix generation flow:
 
 ```text
 support_matrix_generate.go
@@ -14,8 +14,10 @@ support_matrix_generate.go
   -> docs/API_SUPPORT.md
 ```
 
-校验：
+Validation gates:
 
-- `support_matrix_test.go`：Agent 注册与 capability profile 必须一一对应。
-- `internal/supportmatrix/matrix_test.go`：profile 必须完整，生成文档不能漂移。
-- `tests/support_matrix_e2e_test.go`：执行真实生成脚本，并比较完整输出。
+- `support_matrix_test.go`: every registered Agent must have exactly one capability profile.
+- `internal/supportmatrix/matrix_test.go`: every profile must define every canonical feature, and the checked-in document must be current.
+- `tests/support_matrix_e2e_test.go`: executes the real generation hook and compares the complete output.
+
+Canonical feature identifiers such as `agent.initialize`, `session.list`, and `turn.stream` are shared across language SDKs. Language-specific APIs map onto these identifiers.

@@ -3,6 +3,7 @@ package supportmatrix
 import (
 	"bytes"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -88,72 +89,72 @@ type Section struct {
 }
 
 var sections = []Section{
-	{Title: "创建与配置", FirstColumn: "API", Rows: []Row{
-		{CapNew, "`New(kind, opts...)`", "仅检查 CLI 是否存在；登录错误可能在首次运行时返回"},
-		{CapWithCwd, "`WithCwd(dir)`", ""},
-		{CapWithModel, "`WithModel(model)`", "OpenCode 通过 ACP session config 设置模型"},
-		{CapWithSystemPrompt, "`WithSystemPrompt(prompt)`", "ACP Agent 在首次提示词前拼接 system prompt"},
-		{CapWithExtraArgs, "`WithExtraArgs(args...)`", "Codex app-server 启动参数固定"},
-		{CapWithEnv, "`WithEnv(env...)`", ""},
+	{Title: "Configuration", FirstColumn: "Feature", Rows: []Row{
+		{CapNew, "`agent.initialize`", "Checks CLI availability only; authentication errors may surface on the first turn"},
+		{CapWithCwd, "`agent.configure.working_directory`", ""},
+		{CapWithModel, "`agent.configure.model`", "OpenCode selects the model through ACP session configuration"},
+		{CapWithSystemPrompt, "`agent.configure.system_prompt`", "ACP agents prepend the system prompt to the first user prompt"},
+		{CapWithExtraArgs, "`agent.configure.runtime_arguments`", "Codex app-server arguments are fixed"},
+		{CapWithEnv, "`agent.configure.environment`", ""},
 	}},
-	{Title: "Agent", FirstColumn: "API", Rows: []Row{
-		{CapNewSession, "`(*Agent).NewSession(ctx)`", ""},
-		{CapListSessions, "`(*Agent).ListSessions(ctx, opts...)`", ""},
-		{CapSessionsIn, "`SessionsIn(dir)`", "按工作目录筛选会话"},
-		{CapAllSessions, "`AllSessions()`", "取消工作目录筛选"},
-		{CapGetSession, "`(*Agent).GetSession(ctx, id)`", ""},
-		{CapAgentClose, "`(*Agent).Close()`", ""},
+	{Title: "Agent Lifecycle", FirstColumn: "Feature", Rows: []Row{
+		{CapNewSession, "`session.create`", ""},
+		{CapListSessions, "`session.list`", ""},
+		{CapSessionsIn, "`session.list.workspace`", "Filters sessions by working directory"},
+		{CapAllSessions, "`session.list.all`", "Removes the working-directory filter"},
+		{CapGetSession, "`session.retrieve`", ""},
+		{CapAgentClose, "`agent.close`", ""},
 	}},
-	{Title: "Session", FirstColumn: "API", Rows: []Row{
-		{CapSessionID, "`(*Session).ID()`", "新会话首次运行前为空"},
-		{CapSessionState, "`(*Session).State()`", "Claude 不会进入 `Blocked`"},
-		{CapSessionRun, "`(*Session).Run(ctx, prompt)`", ""},
-		{CapSessionStream, "`(*Session).Stream(ctx, prompt)`", ""},
-		{CapSessionInterrupt, "`(*Session).Interrupt(ctx)`", "Claude 终止进程后在下一轮自动恢复"},
-		{CapSessionContinue, "`(*Session).Continue(ctx, input)`", "Codex 仅支持命令和文件审批；ACP 使用运行时返回的 option ID"},
+	{Title: "Session Lifecycle", FirstColumn: "Feature", Rows: []Row{
+		{CapSessionID, "`session.identity`", "Empty until the first turn starts for a new session"},
+		{CapSessionState, "`session.state`", "Claude does not enter the blocked state"},
+		{CapSessionRun, "`turn.run`", ""},
+		{CapSessionStream, "`turn.stream`", ""},
+		{CapSessionInterrupt, "`turn.interrupt`", "Claude terminates its process and resumes automatically on the next turn"},
+		{CapSessionContinue, "`turn.continue`", "Codex supports command and file approvals only; ACP uses runtime-provided option IDs"},
 	}},
-	{Title: "Stream", FirstColumn: "API", Rows: []Row{
-		{CapStreamNext, "`(*Stream).Next()`", ""},
-		{CapStreamEvent, "`(*Stream).Event()`", ""},
-		{CapStreamResult, "`(*Stream).Result()`", ""},
+	{Title: "Stream Consumption", FirstColumn: "Feature", Rows: []Row{
+		{CapStreamNext, "`stream.advance`", ""},
+		{CapStreamEvent, "`stream.current_event`", ""},
+		{CapStreamResult, "`stream.collect_result`", ""},
 	}},
-	{Title: "事件", FirstColumn: "`Event.Kind`", Rows: []Row{
-		{CapEventThinking, "`KindThinking`", "是否产生取决于模型和配置"},
-		{CapEventText, "`KindText`", ""},
-		{CapEventToolCall, "`KindToolCall`", "Codex 命令映射为 `shell`，MCP 工具映射为 `server/tool`"},
-		{CapEventToolResult, "`KindToolResult`", "Codex 仅映射命令输出，不包含 MCP 结果"},
+	{Title: "Event Types", FirstColumn: "Feature", Rows: []Row{
+		{CapEventThinking, "`event.thinking`", "Emission depends on the selected model and runtime configuration"},
+		{CapEventText, "`event.text`", ""},
+		{CapEventToolCall, "`event.tool_call`", "Codex maps commands to `shell` and MCP tools to `server/tool`"},
+		{CapEventToolResult, "`event.tool_result`", "Codex maps command output only, excluding MCP results"},
 	}},
-	{Title: "Result", FirstColumn: "字段", Rows: []Row{
-		{CapResultText, "`Text`", ""},
-		{CapResultThinking, "`Thinking`", ""},
-		{CapResultToolCalls, "`ToolCalls`", ""},
-		{CapResultSessionID, "`SessionID`", ""},
-		{CapResultUsage, "`Usage`", "运行时未上报时为 `nil`"},
-		{CapResultDuration, "`DurationMs`", "未上报时为 `0`"},
-		{CapResultInterrupted, "`Interrupted`", ""},
-		{CapResultBlocked, "`Blocked`", "Codex 仅支持工具和文件审批；ACP 支持工具审批"},
+	{Title: "Turn Result", FirstColumn: "Feature", Rows: []Row{
+		{CapResultText, "`result.text`", ""},
+		{CapResultThinking, "`result.thinking`", ""},
+		{CapResultToolCalls, "`result.tool_calls`", ""},
+		{CapResultSessionID, "`result.session_identity`", ""},
+		{CapResultUsage, "`result.usage`", "Absent when the runtime does not report usage"},
+		{CapResultDuration, "`result.duration`", "Zero when the runtime does not report duration"},
+		{CapResultInterrupted, "`result.interrupted`", ""},
+		{CapResultBlocked, "`result.blocked`", "Codex supports tool and file approvals; ACP supports tool approval"},
 	}},
-	{Title: "Usage", FirstColumn: "`driver.TokenUsage` 字段", Rows: []Row{
-		{CapUsageInput, "`InputTokens`", ""},
-		{CapUsageOutput, "`OutputTokens`", ""},
-		{CapUsageCacheRead, "`CacheReadTokens`", ""},
-		{CapUsageCacheWrite, "`CacheWriteTokens`", ""},
-		{CapUsageCost, "`CostUSD`", ""},
+	{Title: "Token Usage", FirstColumn: "Feature", Rows: []Row{
+		{CapUsageInput, "`usage.input_tokens`", ""},
+		{CapUsageOutput, "`usage.output_tokens`", ""},
+		{CapUsageCacheRead, "`usage.cache_read_tokens`", ""},
+		{CapUsageCacheWrite, "`usage.cache_write_tokens`", ""},
+		{CapUsageCost, "`usage.cost`", ""},
 	}},
-	{Title: "SessionInfo", FirstColumn: "字段", Rows: []Row{
-		{CapSessionInfoID, "`ID`", ""},
-		{CapSessionInfoTitle, "`Title`", ""},
-		{CapSessionInfoCwd, "`Cwd`", ""},
-		{CapSessionInfoStarted, "`StartedAt`", "Claude 使用历史文件修改时间；ACP 未映射该字段"},
-		{CapSessionInfoUpdated, "`UpdatedAt`", ""},
-		{CapSessionInfoCount, "`MessageCount`", "ACP 从运行时 `_meta.messageCount` 读取"},
+	{Title: "Session Metadata", FirstColumn: "Feature", Rows: []Row{
+		{CapSessionInfoID, "`session.metadata.identity`", ""},
+		{CapSessionInfoTitle, "`session.metadata.title`", ""},
+		{CapSessionInfoCwd, "`session.metadata.working_directory`", ""},
+		{CapSessionInfoStarted, "`session.metadata.started_at`", "Claude uses the history file modification time; ACP does not map this field"},
+		{CapSessionInfoUpdated, "`session.metadata.updated_at`", ""},
+		{CapSessionInfoCount, "`session.metadata.message_count`", "ACP reads runtime `_meta.messageCount`"},
 	}},
-	{Title: "阻塞类型", FirstColumn: "`BlockedKind`", Rows: []Row{
-		{CapBlockedUserInput, "`BlockedUserInput`", ""},
-		{CapBlockedTool, "`BlockedToolApproval`", ""},
-		{CapBlockedPermission, "`BlockedPermission`", ""},
-		{CapBlockedAuth, "`BlockedAuthentication`", ""},
-		{CapBlockedExternal, "`BlockedExternal`", ""},
+	{Title: "Blocking Reasons", FirstColumn: "Feature", Rows: []Row{
+		{CapBlockedUserInput, "`blocking.user_input`", ""},
+		{CapBlockedTool, "`blocking.tool_approval`", ""},
+		{CapBlockedPermission, "`blocking.permission`", ""},
+		{CapBlockedAuth, "`blocking.authentication`", ""},
+		{CapBlockedExternal, "`blocking.external`", ""},
 	}},
 }
 
@@ -218,14 +219,25 @@ func Profiles() []Profile {
 	}
 }
 
+var canonicalFeaturePattern = regexp.MustCompile(`^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$`)
+
 func Validate(profiles []Profile) error {
 	want := make(map[Capability]struct{})
+	featureIDs := make(map[string]struct{})
 	for _, section := range sections {
 		for _, row := range section.Rows {
 			if _, duplicate := want[row.Capability]; duplicate {
 				return fmt.Errorf("duplicate capability %q", row.Capability)
 			}
 			want[row.Capability] = struct{}{}
+			featureID := strings.Trim(row.Label, "`")
+			if row.Label != "`"+featureID+"`" || !canonicalFeaturePattern.MatchString(featureID) {
+				return fmt.Errorf("invalid canonical feature identifier %q", row.Label)
+			}
+			if _, duplicate := featureIDs[featureID]; duplicate {
+				return fmt.Errorf("duplicate canonical feature identifier %q", featureID)
+			}
+			featureIDs[featureID] = struct{}{}
 		}
 	}
 	seenKinds := make(map[string]struct{})
@@ -255,8 +267,8 @@ func Markdown() ([]byte, error) {
 	}
 	var out bytes.Buffer
 	out.WriteString("<!-- Code generated by scripts/generate-support-matrix.sh; DO NOT EDIT. -->\n\n")
-	out.WriteString("# unio 一层 API 支持矩阵\n\n## 支持概览\n\n")
-	writeHeader(&out, "Agent", []string{"运行/流式", "会话列表", "会话恢复", "中断", "阻塞/继续", "工具结果流", "用量"}, false)
+	out.WriteString("# unio SDK Feature Support Matrix\n\n## Support Overview\n\n")
+	writeHeader(&out, "Agent", []string{"Execution", "Session Listing", "Session Resume", "Interruption", "Blocking", "Tool Results", "Usage"}, false)
 	overview := []Capability{CapSessionRun, CapListSessions, CapGetSession, CapSessionInterrupt, CapSessionContinue, CapEventToolResult, CapResultUsage}
 	for _, profile := range profiles {
 		cells := make([]string, 0, len(overview))
@@ -265,7 +277,7 @@ func Markdown() ([]byte, error) {
 		}
 		writeRow(&out, profile.Label, cells, noNote)
 	}
-	out.WriteString("\n| 标记 | 含义 |\n| --- | --- |\n| ✅ | 支持 |\n| ⚠️ | 部分支持，限制见备注 |\n| ❌ | 不支持 |\n")
+	out.WriteString("\n| Marker | Meaning |\n| --- | --- |\n| ✅ | Supported |\n| ⚠️ | Partially supported; see notes |\n| ❌ | Unsupported |\n")
 
 	for _, section := range sections {
 		out.WriteString("\n## " + section.Title + "\n\n")
@@ -287,17 +299,16 @@ func Markdown() ([]byte, error) {
 		}
 	}
 
-	out.WriteString("\n## 公共契约\n\n")
+	out.WriteString("\n## Cross-Language Contracts\n\n")
 	kinds := make([]string, 0, len(profiles))
 	for _, profile := range profiles {
 		kinds = append(kinds, "`"+agentSymbol(profile.Kind)+"`")
 	}
-	out.WriteString("- Agent：`AgentKind`（" + strings.Join(kinds, "、") + "）\n")
-	out.WriteString("- 状态：`SessionState`（`Idle`、`Running`、`Blocked`）\n")
-	out.WriteString("- 数据类型：`Event`、`ToolCall`、`Result`、`SessionInfo`、`BlockedReason`、`BlockOption`\n")
-	out.WriteString("- 会话筛选：`ListSessionsOption`、`SessionsIn`、`AllSessions`\n")
-	out.WriteString("- 哨兵错误：`ErrInvalidState`、`ErrSessionNotFound`\n")
-	out.WriteString("- 错误类别：`transport`、`protocol`、`timeout`、`runtime_reported`、`unsupported`、`not_installed`、`invalid_state`、`session_not_found`\n")
+	out.WriteString("- Agent kinds: " + strings.Join(kinds, ", ") + "\n")
+	out.WriteString("- Session states: `idle`, `running`, `blocked`\n")
+	out.WriteString("- Event kinds: `thinking`, `text`, `tool_call`, `tool_result`\n")
+	out.WriteString("- Blocking reasons: `user_input`, `tool_approval`, `permission`, `authentication`, `external`\n")
+	out.WriteString("- Error kinds: `transport`, `protocol`, `timeout`, `runtime_reported`, `unsupported`, `not_installed`, `invalid_state`, `session_not_found`\n")
 	return out.Bytes(), nil
 }
 
@@ -314,17 +325,17 @@ func ProfileKinds() []string {
 func overviewCell(profile Profile, capability Capability) string {
 	level := profile.Support[capability]
 	if capability == CapSessionContinue && profile.Kind == "codex" {
-		return "⚠️ 仅审批"
+		return "⚠️ Approvals only"
 	}
 	if capability == CapEventToolResult && profile.Kind == "codex" {
-		return "⚠️ 仅命令输出"
+		return "⚠️ Command output only"
 	}
 	if capability == CapResultUsage {
 		switch profile.Kind {
 		case "claude":
-			return "✅ 含缓存写入、成本、耗时"
+			return "✅ Includes cache writes, cost, and duration"
 		case "codex":
-			return "⚠️ 无缓存写入、成本、耗时"
+			return "⚠️ No cache writes, cost, or duration"
 		}
 	}
 	return marker(level)
@@ -366,7 +377,7 @@ func writeHeader(out *bytes.Buffer, first string, columns []string, notes bool) 
 		out.WriteString(" | " + column)
 	}
 	if notes {
-		out.WriteString(" | 备注")
+		out.WriteString(" | Notes")
 	}
 	out.WriteString(" |\n| ---")
 	for range columns {
