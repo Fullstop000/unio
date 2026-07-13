@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added a repository-local `ship` skill for reviewed PR delivery and optional tagged Go module releases.
+
 - You can now use `MaxSessions` to cap results returned by `Agent.ListSessions`.
 
 - Replaced package-level `Run`/`Start` with long-lived `Agent` instances.

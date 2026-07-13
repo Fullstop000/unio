@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ship unio"
+  short_description: "Land unio changes and optionally cut a Go release"
+  default_prompt: "Use $ship to land the current unio change safely and ask before cutting a release."
