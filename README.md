@@ -7,6 +7,9 @@ Built-in ACP v1 runtimes are selected with `unio.Kimi`, `unio.TraeX`, and
 `unio.OpenCode`. TraeX executable discovery recognizes `traex`, `trae-cli`,
 `coco`, and `traecli`.
 
+See [docs/API_SUPPORT.md](docs/API_SUPPORT.md) for the complete top-level API
+inventory and the per-Agent support matrix.
+
 ## Install
 
 ```sh

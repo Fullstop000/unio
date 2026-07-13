@@ -24,6 +24,7 @@ type runtimeConfig struct {
 	executable   string
 	alternatives []string
 	buildArgs    func(driver.AgentSpec) []string
+	modelConfig  string
 }
 
 func configFor(runtime Runtime) runtimeConfig {
@@ -66,8 +67,9 @@ func configFor(runtime Runtime) runtimeConfig {
 		}
 	case OpenCode:
 		return runtimeConfig{
-			name:       "opencode",
-			executable: "opencode",
+			name:        "opencode",
+			executable:  "opencode",
+			modelConfig: "model",
 			alternatives: compactPaths(
 				filepath.Join(home, ".opencode", "bin", "opencode"),
 			),

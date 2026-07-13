@@ -14,6 +14,8 @@ import (
 	"github.com/Fullstop000/unio/driver/acp"
 )
 
+const openCodeDeepSeekV4Flash = "deepseek/deepseek-v4-flash"
+
 // TestReal_ACP_TraeXCore is the primary real-runtime proof for the shared ACP
 // state machine. The other runtimes have protocol-only tests below so local
 // provider credentials do not masquerade as transport failures.
@@ -110,7 +112,7 @@ func TestReal_ACP_OpenCodeProtocol(t *testing.T) {
 		t.Skipf("opencode unavailable: probe=%+v err=%v", probe, err)
 	}
 	defer d.Close()
-	spec := driver.AgentSpec{Cwd: cwd, ExtraArgs: []string{"--pure"}}
+	spec := driver.AgentSpec{Cwd: cwd, Model: openCodeDeepSeekV4Flash, ExtraArgs: []string{"--pure"}}
 	listed, err := d.ListSessions(ctx, driver.ListSessionsParams{Cwd: cwd, Spec: spec})
 	if err != nil {
 		t.Fatalf("session/list: %v", err)
@@ -130,6 +132,54 @@ func TestReal_ACP_OpenCodeProtocol(t *testing.T) {
 	if err := att.Session.Close(ctx); err != nil {
 		t.Fatal(err)
 	}
+	if len(listed) > 0 {
+		resumeSpec := spec
+		if listed[0].Cwd != "" {
+			resumeSpec.Cwd = listed[0].Cwd
+		}
+		resumeDriver := acp.New(acp.OpenCode)
+		defer resumeDriver.Close()
+		resumed, err := resumeDriver.OpenSession(ctx, "opencode-resume", resumeSpec, driver.OpenParams{ResumeSessionID: listed[0].SessionID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resumed.Events.Subscribe()
+		if err := resumed.Session.Run(ctx, nil); err != nil {
+			t.Fatalf("session/resume: %v", err)
+		}
+		if resumed.Session.SessionID() != listed[0].SessionID {
+			t.Fatalf("resumed ID = %q, want %q", resumed.Session.SessionID(), listed[0].SessionID)
+		}
+		if err := resumed.Session.Close(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestReal_ACP_OpenCodeDeepSeekV4Flash(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	agent, err := unio.New(
+		unio.OpenCode,
+		unio.WithModel(openCodeDeepSeekV4Flash),
+		unio.WithExtraArgs("--pure"),
+	)
+	if err != nil {
+		t.Skipf("opencode unavailable: %v", err)
+	}
+	defer agent.Close()
+	session, err := agent.NewSession(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := session.Run(ctx, "Reply with exactly one word: ok")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(result.Text) == "" || result.SessionID == "" {
+		t.Fatalf("result = %+v", result)
+	}
+	t.Logf("opencode %s said %q", openCodeDeepSeekV4Flash, strings.TrimSpace(result.Text))
 }
 
 func TestReal_ACP_TraeXResume(t *testing.T) {
