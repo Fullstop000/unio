@@ -2,6 +2,7 @@ package claude
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -40,5 +41,26 @@ func TestRawSessionDataAndTokenStatistics(t *testing.T) {
 	}
 	if got.InputTokens != 49 || got.OutputTokens != 5 || got.CacheReadTokens != 14 || got.CacheWriteTokens != 5 {
 		t.Fatalf("statistics = %+v", got)
+	}
+
+	if err := os.WriteFile(path, []byte(`{"type":"user","message":{"role":"user"}}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dataSource.TokenStatistics(); !errors.Is(err, driver.NewProtocolError("")) {
+		t.Fatalf("incomplete statistics error = %v; want protocol", err)
+	}
+}
+
+func TestRawSessionDataPreservesCancellation(t *testing.T) {
+	root := t.TempDir()
+	previous := claudeSessionsRoot
+	claudeSessionsRoot = func() (string, error) { return root, nil }
+	t.Cleanup(func() { claudeSessionsRoot = previous })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := New().NewSessionData(ctx, driver.AgentSpec{}, "session-id").Raw()
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v; want context.Canceled", err)
 	}
 }

@@ -59,6 +59,9 @@ func findClaudeSession(ctx context.Context, sessionID string) (string, error) {
 		}
 		return nil
 	})
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	if err != nil && !errors.Is(err, fs.SkipAll) {
 		return "", driver.NewTransportError("claude: read session history: " + err.Error())
 	}
@@ -78,15 +81,21 @@ func (d *sessionData) TokenStatistics() (driver.TokenUsage, error) {
 	}
 	var total driver.TokenUsage
 	byMessage := make(map[string]driver.TokenUsage)
+	pendingResponse := false
 	scanner := bufio.NewScanner(bytes.NewReader(raw.Data))
 	scanner.Buffer(make([]byte, 64*1024), 16*1024*1024)
 	for scanner.Scan() {
 		if err := d.ctx.Err(); err != nil {
 			return driver.TokenUsage{}, err
 		}
+		line := scanner.Bytes()
+		if len(bytes.TrimSpace(line)) == 0 {
+			continue
+		}
 		var record struct {
-			Type    string `json:"type"`
-			Message struct {
+			Type        string `json:"type"`
+			IsSidechain bool   `json:"isSidechain"`
+			Message     struct {
 				ID    string `json:"id"`
 				Usage struct {
 					InputTokens      int64 `json:"input_tokens"`
@@ -96,8 +105,18 @@ func (d *sessionData) TokenStatistics() (driver.TokenUsage, error) {
 				} `json:"usage"`
 			} `json:"message"`
 		}
-		if json.Unmarshal(scanner.Bytes(), &record) != nil || record.Type != "assistant" {
+		if err := json.Unmarshal(line, &record); err != nil {
+			return driver.TokenUsage{}, driver.NewProtocolError("claude: parse session data: invalid JSONL record")
+		}
+		if record.Type == "user" && !record.IsSidechain {
+			pendingResponse = true
 			continue
+		}
+		if record.Type != "assistant" {
+			continue
+		}
+		if !record.IsSidechain {
+			pendingResponse = false
 		}
 		usage := driver.TokenUsage{
 			InputTokens:     record.Message.Usage.InputTokens + record.Message.Usage.CacheReadTokens + record.Message.Usage.CacheWriteTokens,
@@ -112,6 +131,9 @@ func (d *sessionData) TokenStatistics() (driver.TokenUsage, error) {
 	}
 	if err := scanner.Err(); err != nil {
 		return driver.TokenUsage{}, driver.NewProtocolError("claude: parse session data: " + err.Error())
+	}
+	if pendingResponse {
+		return driver.TokenUsage{}, driver.NewProtocolError("claude: latest turn is not fully persisted yet")
 	}
 	for _, usage := range byMessage {
 		total.Add(usage)

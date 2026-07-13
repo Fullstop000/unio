@@ -52,7 +52,7 @@ func TestReal_Claude_Run(t *testing.T) {
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		stats, err = session.TokenStatistics(context.Background())
-		if err != nil || (stats.InputTokens > 0 && stats.OutputTokens > 0) {
+		if err == nil && stats.InputTokens > 0 && stats.OutputTokens > 0 {
 			break
 		}
 		time.Sleep(50 * time.Millisecond)

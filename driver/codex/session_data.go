@@ -60,6 +60,9 @@ func findCodexSession(ctx context.Context, sessionID string) (string, error) {
 		}
 		return nil
 	})
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	if err != nil && !errors.Is(err, fs.SkipAll) {
 		return "", driver.NewTransportError("codex: read session history: " + err.Error())
 	}

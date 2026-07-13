@@ -227,49 +227,21 @@ func (s *session) finishPrompt(turn *promptTurn, response rpcResponse) {
 		s.bus.Emit(driver.FailedEvent(s.key, s.SessionID(), runID, driver.NewProtocolError("acp session/prompt: "+errorMessage(response.err))))
 	} else {
 		finish := driver.FinishNatural
-		promptResult := parsePromptResult(response.result)
-		if interrupted || promptResult.StopReason == "cancelled" {
+		if interrupted || promptStopReason(response.result) == "cancelled" {
 			finish = driver.FinishCancelled
 		}
-		result := driver.RunResult{FinishReason: finish}
-		if promptResult.Usage != nil {
-			model := s.spec.Model
-			if model == "" {
-				model = s.proc.cfg.name
-			}
-			result.Usage = map[string]driver.TokenUsage{model: *promptResult.Usage}
-		}
-		s.bus.Emit(driver.CompletedEvent(s.key, s.SessionID(), runID, result))
+		s.bus.Emit(driver.CompletedEvent(s.key, s.SessionID(), runID, driver.RunResult{FinishReason: finish}))
 	}
 	s.setState(driver.ProcessState{Phase: driver.PhaseActive, SessionID: s.SessionID()})
 	close(turn.done)
 }
 
-type parsedPromptResult struct {
-	StopReason string
-	Usage      *driver.TokenUsage
-}
-
-func parsePromptResult(result json.RawMessage) parsedPromptResult {
+func promptStopReason(result json.RawMessage) string {
 	var response struct {
 		StopReason string `json:"stopReason"`
-		Usage      *struct {
-			InputTokens       int64 `json:"inputTokens"`
-			OutputTokens      int64 `json:"outputTokens"`
-			CachedReadTokens  int64 `json:"cachedReadTokens"`
-			CachedWriteTokens int64 `json:"cachedWriteTokens"`
-		} `json:"usage"`
 	}
 	_ = json.Unmarshal(result, &response)
-	parsed := parsedPromptResult{StopReason: response.StopReason}
-	if response.Usage != nil {
-		parsed.Usage = &driver.TokenUsage{
-			InputTokens: response.Usage.InputTokens, OutputTokens: response.Usage.OutputTokens,
-			CacheReadTokens:  response.Usage.CachedReadTokens,
-			CacheWriteTokens: response.Usage.CachedWriteTokens,
-		}
-	}
-	return parsed
+	return response.StopReason
 }
 
 func (s *session) Continue(ctx context.Context, input string) (driver.RunID, error) {

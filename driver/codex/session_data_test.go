@@ -2,6 +2,7 @@ package codex
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -39,5 +40,19 @@ func TestRawSessionDataAndTokenStatistics(t *testing.T) {
 	}
 	if got.InputTokens != 30 || got.OutputTokens != 5 || got.CacheReadTokens != 18 {
 		t.Fatalf("statistics = %+v", got)
+	}
+}
+
+func TestRawSessionDataPreservesCancellation(t *testing.T) {
+	root := t.TempDir()
+	previous := codexSessionsRoot
+	codexSessionsRoot = func() (string, error) { return root, nil }
+	t.Cleanup(func() { codexSessionsRoot = previous })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := New().NewSessionData(ctx, driver.AgentSpec{}, "session-id").Raw()
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v; want context.Canceled", err)
 	}
 }

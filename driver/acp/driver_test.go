@@ -319,43 +319,6 @@ func TestPermissionBecomesBlockedAndContinueResumesTurn(t *testing.T) {
 	}
 }
 
-func TestPromptResultUsageIsPropagated(t *testing.T) {
-	d := newWithTransport(Kimi, scriptedFactory(t, func(msg map[string]json.RawMessage, send func(any)) {
-		switch rawString(msg["method"]) {
-		case "initialize":
-			send(response(msg["id"], map[string]any{"protocolVersion": 1, "agentCapabilities": map[string]any{}}))
-		case "session/new":
-			send(response(msg["id"], map[string]any{"sessionId": "s1"}))
-		case "session/prompt":
-			send(response(msg["id"], map[string]any{
-				"stopReason": "end_turn",
-				"usage": map[string]any{
-					"totalTokens": 130, "inputTokens": 100, "outputTokens": 30,
-					"cachedReadTokens": 60, "cachedWriteTokens": 5,
-				},
-			}))
-		}
-	}))
-	spec := testAgentSpec()
-	spec.Model = "test-model"
-	att, err := d.OpenSession(context.Background(), "key", spec, driver.OpenParams{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	events := att.Events.Subscribe()
-	if err := att.Session.Run(context.Background(), nil); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := att.Session.Prompt(context.Background(), driver.PromptReq{Text: "hello"}); err != nil {
-		t.Fatal(err)
-	}
-	completed := waitEvent(t, events, driver.EventCompleted)
-	usage := completed.Result.Usage["test-model"]
-	if usage.InputTokens != 100 || usage.OutputTokens != 30 || usage.CacheReadTokens != 60 || usage.CacheWriteTokens != 5 {
-		t.Fatalf("usage = %+v", usage)
-	}
-}
-
 func TestInterruptWaitsForCancelledPromptResponse(t *testing.T) {
 	var promptID json.RawMessage
 	d := newWithTransport(OpenCode, scriptedFactory(t, func(msg map[string]json.RawMessage, send func(any)) {

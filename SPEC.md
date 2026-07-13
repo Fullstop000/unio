@@ -139,6 +139,7 @@ idle Session with a runtime ID.
 `Session.TokenStatistics` parses the data returned by `Session.Raw` into a
 session-wide aggregate. It never reads another source. Unsupported runtimes
 return `unsupported`; an idle new Session without an ID returns `invalid_state`.
+An incomplete persisted turn returns `protocol` rather than a partial aggregate.
 
 Input token statistics include cached input. Cache-read and cache-write values
 are also exposed separately when present. Missing cost data remains zero.
