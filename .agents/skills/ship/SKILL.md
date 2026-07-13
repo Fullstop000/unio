@@ -15,7 +15,7 @@ unio has no version file and no binary Release workflow. The latest `vX.Y.Z` Git
 - Keep the feature, changelog entry, and optional version preparation in one PR. Never create a follow-up release PR for the same shipment.
 - Never push directly to `master`.
 - Never merge, enable auto-merge, or push a tag without explicit human approval.
-- Never assume squash merge approval. Ask which GitHub merge method to use if the approval does not name one.
+- Use squash merge only. Ask whether to approve the squash merge, never which merge method to use.
 - Stop on a failed gate, secret hit, unresolved review finding, or red CI. Fix the cause and rerun the affected gates.
 - Preserve unrelated user changes. Do not stash, discard, or include them without permission.
 - Tag the exact commit merged into `origin/master`, never the pre-merge branch tip.
@@ -137,13 +137,13 @@ Report the exact state and wait for explicit approval:
 - unresolved risks, if any;
 - either “entries remain under `Unreleased`” or “prepared `vX.Y.Z`”.
 
-Ask for the merge method if it was not specified. Then use the approved method, for example:
+Ask for explicit squash-merge approval. After approval, run:
 
 ```bash
 gh pr merge <number> --squash
 ```
 
-Substitute `--merge` or `--rebase` only when that is what the human approved. Do not use `--auto`. Avoid `--delete-branch`: unio is commonly used through linked worktrees, where local branch cleanup can conflict with a branch checked out elsewhere. Delete the remote branch separately only if requested.
+Do not use `--merge`, `--rebase`, or `--auto`. Avoid `--delete-branch`: unio is commonly used through linked worktrees, where local branch cleanup can conflict with a branch checked out elsewhere. Delete the remote branch separately only if requested.
 
 ## 7. Tag an approved release
 
