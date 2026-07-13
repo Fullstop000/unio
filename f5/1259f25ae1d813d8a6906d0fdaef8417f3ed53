@@ -1,0 +1,23 @@
+README.md
+  s_603ee6dacfd6ff::t_f3c97136942cf3 122-123
+docs/SUPPORT_MATRIX_GENERATION.md
+  s_603ee6dacfd6ff::t_bb76d79aecd969 1,7
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "f51259f25ae1d813d8a6906d0fdaef8417f3ed53",
+  "prompts": {},
+  "sessions": {
+    "s_603ee6dacfd6ff": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4b1f-b12a-75c1-af02-0c3edd4900ad",
+        "model": "unknown"
+      },
+      "human_author": "Fullstop000 <fullstop1005@gmail.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
