@@ -1,0 +1,33 @@
+.agents/skills/ship/SKILL.md
+  s_603ee6dacfd6ff::t_16da3f65a17f3a 1-183
+.agents/skills/ship/agents/openai.yaml
+  s_b59428eee3299c::t_81c304a0039956 1-4
+CHANGELOG.md
+  s_b59428eee3299c::t_52a6a0592e3a89 5-6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a3c603f232e464a5a6dbeb849a2ec61db6f33a51",
+  "prompts": {},
+  "sessions": {
+    "s_603ee6dacfd6ff": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4b1f-b12a-75c1-af02-0c3edd4900ad",
+        "model": "unknown"
+      },
+      "human_author": "Fullstop000 <fullstop1005@gmail.com>"
+    },
+    "s_b59428eee3299c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5a14-4392-7c72-8e3f-f67ac8e44fa0",
+        "model": "unknown"
+      },
+      "human_author": "Fullstop000 <fullstop1005@gmail.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
