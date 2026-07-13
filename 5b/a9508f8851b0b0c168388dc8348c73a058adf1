@@ -1,0 +1,35 @@
+README.md
+  s_603ee6dacfd6ff::t_c8cd4330b23735 116-123
+docs/API_SUPPORT.md
+  s_603ee6dacfd6ff::t_3d9f3a3f58a39b 1
+docs/GENERATION.md
+  s_603ee6dacfd6ff::t_21e2a959112839 1-21
+internal/generate/supportmatrix/main.go
+  s_603ee6dacfd6ff::t_a685b90566ecd0 1
+internal/supportmatrix/matrix.go
+  s_603ee6dacfd6ff::t_ae25a4cdc00d3b 257
+scripts/generate-support-matrix.sh
+  s_603ee6dacfd6ff::t_aab459c13420b8 1-7
+support_matrix_generate.go
+  s_603ee6dacfd6ff::t_369760543ef49b 3
+tests/support_matrix_e2e_test.go
+  s_603ee6dacfd6ff::t_3d39f24581819b 25,45
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "5ba9508f8851b0b0c168388dc8348c73a058adf1",
+  "prompts": {},
+  "sessions": {
+    "s_603ee6dacfd6ff": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4b1f-b12a-75c1-af02-0c3edd4900ad",
+        "model": "unknown"
+      },
+      "human_author": "Fullstop000 <fullstop1005@gmail.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
