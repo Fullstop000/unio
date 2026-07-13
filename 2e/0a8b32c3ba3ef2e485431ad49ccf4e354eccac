@@ -1,0 +1,21 @@
+.agents/skills/ship/SKILL.md
+  s_b59428eee3299c::t_328a077bd56a53 18,140,146
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "2e0a8b32c3ba3ef2e485431ad49ccf4e354eccac",
+  "prompts": {},
+  "sessions": {
+    "s_b59428eee3299c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5a14-4392-7c72-8e3f-f67ac8e44fa0",
+        "model": "unknown"
+      },
+      "human_author": "Fullstop000 <fullstop1005@gmail.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
