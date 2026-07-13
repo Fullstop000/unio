@@ -1,0 +1,63 @@
+agent.go
+  s_603ee6dacfd6ff::t_4c87aba2a44181 18,33,37,40
+agent_api_test.go
+  s_603ee6dacfd6ff::t_a40715527b3e14 11,22-28,31-38,41-49,52-56,59,118,120,134-135,143,227,260,276-288,308,421,427,433,439,454,504,508,539,544,546,581,583,614,616,716,718,742,744,772,774,803,805
+driver/acp/driver.go
+  s_603ee6dacfd6ff::t_3cc804a958c16e 11,29,32,34,112
+driver/acp/driver_test.go
+  s_603ee6dacfd6ff::t_65a1229f2df72b 33
+driver/acp/session_statistics.go
+  s_603ee6dacfd6ff::t_d3155589fb46f4 18-34
+driver/claude/driver.go
+  s_603ee6dacfd6ff::t_760adaac962faa 12,33,36,38,495-496
+driver/claude/driver_test.go
+  s_603ee6dacfd6ff::t_6d0e8f4e7a686b 421-422
+driver/claude/headless.go
+  s_603ee6dacfd6ff::t_a02923deb86312 1
+driver/claude/session_data.go
+  s_603ee6dacfd6ff::t_e489c1158aa260 16-32
+driver/claude/session_data_test.go
+  s_603ee6dacfd6ff::t_f80a69320ca17d 32-33,37,48,61
+driver/codex/appserver.go
+  s_603ee6dacfd6ff::t_3874c4e1a640c1 1
+driver/codex/driver.go
+  s_603ee6dacfd6ff::t_49b5396964018f 20,38,40,42,556-557
+driver/codex/session_data.go
+  s_603ee6dacfd6ff::t_227c75ab528d02 17-33
+driver/codex/session_data_test.go
+  s_603ee6dacfd6ff::t_0ba4082d0b003c 31-32,36,53
+driver/driver.go
+  s_603ee6dacfd6ff::t_d97b8abd7db437 19,191,261,268,274,276,316-321
+driver/fake/fake.go
+  s_603ee6dacfd6ff::t_927751603c40ab 1,31,38,47,52,83-84,90,103,181-188,387-388
+driver/fake/fake_test.go
+  s_603ee6dacfd6ff::t_f2a7c566e3a0c6 255
+facade.go
+  s_603ee6dacfd6ff::t_da35c2fa550835 185-192,195
+session.go
+  s_603ee6dacfd6ff::t_76612b66af1111 51,55,58,75-76,78-80,88,92,159-195
+tests/fake_e2e_test.go
+  s_603ee6dacfd6ff::t_d87ce99aa30ca9 17
+tests/harness.go
+  s_603ee6dacfd6ff::t_8b704ec042ae46 2,28
+tests/real_acp_test.go
+  s_603ee6dacfd6ff::t_2b085cb8430fa0 65,88-92,94,97-98,117,171
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "bafef77018c2671fed08064b0f74e430135db2bc",
+  "prompts": {},
+  "sessions": {
+    "s_603ee6dacfd6ff": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4b1f-b12a-75c1-af02-0c3edd4900ad",
+        "model": "unknown"
+      },
+      "human_author": "Fullstop000 <fullstop1005@gmail.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
