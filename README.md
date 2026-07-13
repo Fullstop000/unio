@@ -94,6 +94,12 @@ session, err := agent.GetSession(ctx, sessions[0].ID)
 
 // Runtime resume is automatic.
 result, err := session.Run(ctx, "Continue the previous work")
+
+// Read the runtime's complete persisted JSONL session data.
+raw, err := session.Raw(ctx)
+
+// Parse cumulative usage across the whole session.
+stats, err := session.TokenStatistics(ctx)
 ```
 
 `ListSessions` defaults to the Agent's working directory. Use
@@ -101,6 +107,10 @@ result, err := session.Run(ctx, "Continue the previous work")
 `ListSessions(ctx, unio.AllSessions())` for every workspace, or
 `ListSessions(ctx, unio.MaxSessions(20))` to cap the returned conversations.
 Options can be combined.
+
+`Session.Raw` is available for Claude Code, Codex, Kimi, and TraeX.
+`Result.Usage` describes one completed turn. `Session.TokenStatistics` parses
+the raw persisted data into a session-wide aggregate for the same four agents.
 
 `Session.State()` exposes only `Idle`, `Running`, and `Blocked`. Runtime process
 and transport lifecycle remain internal.

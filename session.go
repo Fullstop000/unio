@@ -43,6 +43,62 @@ func (s *Session) State() SessionState {
 	return s.state
 }
 
+// Raw returns the runtime-owned persisted representation of this session.
+// The session must have a runtime ID and must not have an active turn.
+func (s *Session) Raw(ctx context.Context) (RawSessionData, error) {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	data, err := s.sessionData(ctx)
+	if err != nil {
+		return RawSessionData{}, err
+	}
+	return data.Raw()
+}
+
+func (s *Session) sessionData(ctx context.Context) (driver.SessionData, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if s.agent.closed.Load() {
+		return nil, errs.InvalidState("agent is closed")
+	}
+	s.mu.Lock()
+	state := s.state
+	id := s.id
+	s.mu.Unlock()
+	if state != Idle {
+		return nil, errs.InvalidState("session data requires an idle session")
+	}
+	if id == "" {
+		return nil, errs.InvalidState("session has no runtime ID")
+	}
+	spec := s.agent.cfg.spec()
+	if s.cwd != "" {
+		spec.Cwd = s.cwd
+	}
+	return s.agent.driver.NewSessionData(ctx, spec, driver.SessionID(id)), nil
+}
+
+// TokenStatistics returns cumulative token usage recorded for this session.
+// The session must have a runtime ID and must not have an active turn.
+func (s *Session) TokenStatistics(ctx context.Context) (TokenStatistics, error) {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	data, err := s.sessionData(ctx)
+	if err != nil {
+		return TokenStatistics{}, err
+	}
+	usage, err := data.TokenStatistics()
+	if err != nil {
+		return TokenStatistics{}, err
+	}
+	return TokenStatistics{
+		InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens,
+		CacheReadTokens: usage.CacheReadTokens, CacheWriteTokens: usage.CacheWriteTokens,
+		CostUSD: usage.CostUSD,
+	}, nil
+}
+
 // Run sends one prompt and waits for completion, interruption, or blocking.
 func (s *Session) Run(ctx context.Context, prompt string) (Result, error) {
 	stream, err := s.Stream(ctx, prompt)

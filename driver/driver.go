@@ -307,10 +307,32 @@ type ProtocolDriver interface {
 	// this host. Drivers that cannot enumerate return an unsupported error.
 	ListSessions(ctx context.Context, params ListSessionsParams) ([]StoredSessionMeta, error)
 
+	// NewSessionData creates an accessor for one runtime-owned persisted
+	// session. Unsupported accessors return unsupported from their methods.
+	NewSessionData(ctx context.Context, spec AgentSpec, sessionID SessionID) SessionData
+
 	// OpenSession opens a session for the given key. The returned Session is in
 	// PhaseIdle; the caller must invoke Session.Run to bring it online.
 	// OpenParams.ResumeSessionID selects new-vs-resume.
 	OpenSession(ctx context.Context, key SessionKey, spec AgentSpec, params OpenParams) (*SessionAttachment, error)
+}
+
+// SessionDataFormat identifies a persisted session representation.
+type SessionDataFormat string
+
+const SessionDataJSONL SessionDataFormat = "jsonl"
+
+// RawSessionData is the runtime-owned persisted representation of one session.
+type RawSessionData struct {
+	Format SessionDataFormat
+	Data   []byte
+}
+
+// SessionData reads and interprets one runtime-owned persisted session.
+// TokenStatistics must derive its result from Raw.
+type SessionData interface {
+	Raw() (RawSessionData, error)
+	TokenStatistics() (TokenUsage, error)
 }
 
 // Session is a per-session lifecycle handle representing one conversation with a

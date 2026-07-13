@@ -35,6 +35,14 @@ func TestReal_Codex_Run(t *testing.T) {
 	for model, u := range res.Usage {
 		t.Logf("usage[%s]: in=%d out=%d cacheRead=%d", model, u.InputTokens, u.OutputTokens, u.CacheReadTokens)
 	}
+	raw, err := session.Raw(ctx)
+	if err != nil || raw.Format != unio.SessionDataJSONL || len(raw.Data) == 0 {
+		t.Fatalf("raw session data: format=%q bytes=%d error=%v", raw.Format, len(raw.Data), err)
+	}
+	stats, err := session.TokenStatistics(ctx)
+	if err != nil || stats.InputTokens == 0 || stats.OutputTokens == 0 {
+		t.Fatalf("session token statistics = %+v, error = %v", stats, err)
+	}
 }
 
 // Real Codex graceful mid-turn interrupt via the facade — the capability Claude

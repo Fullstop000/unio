@@ -4,7 +4,7 @@ unio is a multi-language SDK family. Every implementation must expose the same
 human-aligned behavior even though Claude Code and Codex use different runtime
 protocols.
 
-**Spec version: 0.4.0**
+**Spec version: 0.5.0**
 
 ## 1. Public object model
 
@@ -126,6 +126,22 @@ back to running.
 
 Partial text, thinking, tool calls, and usage produced before blocking or
 interruption remain in the Result.
+
+### Token usage and session statistics
+
+`Result.Usage` describes one turn. It is populated only from usage associated
+with that turn and must not contain an entire session's cumulative usage.
+
+`Session.Raw` is a separate, optional capability that returns the complete
+runtime-owned persisted session representation and its format. It requires an
+idle Session with a runtime ID.
+
+`Session.TokenStatistics` parses the data returned by `Session.Raw` into a
+session-wide aggregate. It never reads another source. Unsupported runtimes
+return `unsupported`; an idle new Session without an ID returns `invalid_state`.
+
+Input token statistics include cached input. Cache-read and cache-write values
+are also exposed separately when present. Missing cost data remains zero.
 
 ## 4. Driver event contract
 

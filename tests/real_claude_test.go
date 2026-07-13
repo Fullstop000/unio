@@ -44,6 +44,22 @@ func TestReal_Claude_Run(t *testing.T) {
 	for model, u := range res.Usage {
 		t.Logf("usage[%s]: in=%d out=%d cost=$%.4f", model, u.InputTokens, u.OutputTokens, u.CostUSD)
 	}
+	raw, err := session.Raw(context.Background())
+	if err != nil || raw.Format != unio.SessionDataJSONL || len(raw.Data) == 0 {
+		t.Fatalf("raw session data: format=%q bytes=%d error=%v", raw.Format, len(raw.Data), err)
+	}
+	var stats unio.TokenStatistics
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		stats, err = session.TokenStatistics(context.Background())
+		if err != nil || (stats.InputTokens > 0 && stats.OutputTokens > 0) {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if err != nil || stats.InputTokens == 0 || stats.OutputTokens == 0 {
+		t.Fatalf("session token statistics = %+v, error = %v", stats, err)
+	}
 }
 
 // Real Claude streaming via the facade Stream handle.

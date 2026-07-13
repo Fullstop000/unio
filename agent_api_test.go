@@ -12,14 +12,52 @@ import (
 	"github.com/Fullstop000/unio/errs"
 )
 
+type statisticsDriver struct {
+	*fake.Driver
+	raw   driver.RawSessionData
+	usage driver.TokenUsage
+}
+
+func (d *statisticsDriver) NewSessionData(ctx context.Context, _ driver.AgentSpec, _ driver.SessionID) driver.SessionData {
+	return statisticsSessionData{ctx: ctx, raw: d.raw, usage: d.usage}
+}
+
+type statisticsSessionData struct {
+	ctx   context.Context
+	raw   driver.RawSessionData
+	usage driver.TokenUsage
+}
+
+func (d statisticsSessionData) Raw() (driver.RawSessionData, error) {
+	if err := d.ctx.Err(); err != nil {
+		return driver.RawSessionData{}, err
+	}
+	return d.raw, nil
+}
+
+func (d statisticsSessionData) TokenStatistics() (driver.TokenUsage, error) {
+	raw, err := d.Raw()
+	if err != nil {
+		return driver.TokenUsage{}, err
+	}
+	if raw.Format != d.raw.Format || string(raw.Data) != string(d.raw.Data) {
+		return driver.TokenUsage{}, driver.NewProtocolError("statistics parser did not receive raw session data")
+	}
+	return d.usage, nil
+}
+
 func newAgentWithDriver(t *testing.T, fd *fake.Driver) *Agent {
 	return newAgentWithDriverOptions(t, fd)
 }
 
 func newAgentWithDriverOptions(t *testing.T, fd *fake.Driver, opts ...Option) *Agent {
+	return newAgentWithProtocolDriverOptions(t, fd, opts...)
+}
+
+func newAgentWithProtocolDriverOptions(t *testing.T, d driver.ProtocolDriver, opts ...Option) *Agent {
 	t.Helper()
 	prev := driverOverride
-	driverOverride = func(AgentKind) (driver.ProtocolDriver, bool) { return fd, true }
+	driverOverride = func(AgentKind) (driver.ProtocolDriver, bool) { return d, true }
 	t.Cleanup(func() { driverOverride = prev })
 	agent, err := New(Claude, opts...)
 	if err != nil {
@@ -103,7 +141,7 @@ func TestACPAgentKindsUseTheSharedDriver(t *testing.T) {
 func TestListAndGetSessionMaintainsIdentity(t *testing.T) {
 	fd := fake.New()
 	fd.SetStoredSessions([]driver.StoredSessionMeta{{SessionID: "stored-1", Title: "auth", Cwd: "/repo"}})
-	agent := newAgentWithDriverOptions(t, fd, WithCwd("/repo"))
+	agent := newAgentWithProtocolDriverOptions(t, fd, WithCwd("/repo"))
 	infos, err := agent.ListSessions(context.Background())
 	if err != nil || len(infos) != 1 || infos[0].ID != "stored-1" {
 		t.Fatalf("infos=%+v err=%v", infos, err)
@@ -187,7 +225,7 @@ func TestListSessionsMaxSessions(t *testing.T) {
 		{SessionID: "two", Cwd: "/repo"},
 		{SessionID: "three", Cwd: "/repo"},
 	})
-	agent := newAgentWithDriverOptions(t, fd, WithCwd("/repo"))
+	agent := newAgentWithProtocolDriverOptions(t, fd, WithCwd("/repo"))
 
 	got, err := agent.ListSessions(context.Background(), MaxSessions(2))
 	if err != nil || len(got) != 2 || got[0].ID != "one" || got[1].ID != "two" {
@@ -210,6 +248,61 @@ func TestGetSessionRejectsUnknownID(t *testing.T) {
 	_, err := agent.GetSession(context.Background(), "missing")
 	if !errors.Is(err, ErrSessionNotFound) {
 		t.Fatalf("error = %v; want session_not_found", err)
+	}
+}
+
+func TestSessionTokenStatistics(t *testing.T) {
+	fd := &statisticsDriver{Driver: fake.New(), raw: driver.RawSessionData{
+		Format: driver.SessionDataJSONL, Data: []byte("raw data"),
+	}, usage: driver.TokenUsage{
+		InputTokens: 100, OutputTokens: 20, CacheReadTokens: 60, CacheWriteTokens: 5,
+	}}
+	fd.SetStoredSessions([]driver.StoredSessionMeta{{SessionID: "stored", Cwd: "/repo"}})
+	agent := newAgentWithProtocolDriverOptions(t, fd, WithCwd("/repo"))
+	session, err := agent.GetSession(context.Background(), "stored")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := session.TokenStatistics(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.InputTokens != 100 || got.OutputTokens != 20 || got.CacheReadTokens != 60 || got.CacheWriteTokens != 5 {
+		t.Fatalf("statistics = %+v", got)
+	}
+	raw, err := session.Raw(context.Background())
+	if err != nil || raw.Format != SessionDataJSONL || string(raw.Data) != "raw data" {
+		t.Fatalf("raw = %+v, error = %v", raw, err)
+	}
+}
+
+func TestSessionTokenStatisticsUnsupported(t *testing.T) {
+	fd := fake.New()
+	fd.SetStoredSessions([]driver.StoredSessionMeta{{SessionID: "stored", Cwd: "/repo"}})
+	agent := newAgentWithDriverOptions(t, fd, WithCwd("/repo"))
+	session, err := agent.GetSession(context.Background(), "stored")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := session.TokenStatistics(context.Background()); !errors.Is(err, driver.NewUnsupportedError("")) {
+		t.Fatalf("error = %v; want unsupported", err)
+	}
+	if _, err := session.Raw(context.Background()); !errors.Is(err, driver.NewUnsupportedError("")) {
+		t.Fatalf("raw error = %v; want unsupported", err)
+	}
+}
+
+func TestSessionRawDataRequiresRuntimeID(t *testing.T) {
+	agent := newAgentWithProtocolDriverOptions(t, &statisticsDriver{Driver: fake.New()})
+	session, err := agent.NewSession(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := session.Raw(context.Background()); !errors.Is(err, ErrInvalidState) {
+		t.Fatalf("raw error = %v; want invalid_state", err)
+	}
+	if _, err := session.TokenStatistics(context.Background()); !errors.Is(err, ErrInvalidState) {
+		t.Fatalf("statistics error = %v; want invalid_state", err)
 	}
 }
 

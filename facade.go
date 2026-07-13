@@ -88,6 +88,24 @@ type Result struct {
 	Blocked     *BlockedReason
 }
 
+// TokenStatistics is cumulative token usage read from persisted session data.
+// It is independent of Result.Usage, which describes one turn only.
+type TokenStatistics struct {
+	InputTokens      int64
+	OutputTokens     int64
+	CacheReadTokens  int64
+	CacheWriteTokens int64
+	CostUSD          float64
+}
+
+// SessionDataFormat identifies a raw persisted session representation.
+type SessionDataFormat = driver.SessionDataFormat
+
+const SessionDataJSONL = driver.SessionDataJSONL
+
+// RawSessionData is the runtime-owned persisted representation of one session.
+type RawSessionData = driver.RawSessionData
+
 // SessionInfo is persisted conversation metadata returned by ListSessions.
 type SessionInfo struct {
 	ID           string

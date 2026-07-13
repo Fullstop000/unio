@@ -5,6 +5,7 @@ package tests
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -43,6 +44,60 @@ func TestReal_ACP_TraeXCore(t *testing.T) {
 	if strings.TrimSpace(result.Text) == "" || result.SessionID == "" {
 		t.Fatalf("result = %+v", result)
 	}
+	stats, err := session.TokenStatistics(ctx)
+	if err != nil {
+		t.Fatalf("session token statistics: %v", err)
+	}
+	if stats.InputTokens == 0 || stats.OutputTokens == 0 {
+		t.Fatalf("session token statistics = %+v", stats)
+	}
+	raw, err := session.Raw(ctx)
+	if err != nil || raw.Format != unio.SessionDataJSONL || len(raw.Data) == 0 {
+		t.Fatalf("raw session data: format=%q bytes=%d error=%v", raw.Format, len(raw.Data), err)
+	}
+}
+
+func TestReal_ACP_KimiSessionTokenStatistics(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	d := acp.New(acp.Kimi)
+	probe, err := d.Probe(ctx)
+	if err != nil || probe.Auth == driver.AuthNotInstalled {
+		t.Skipf("kimi unavailable: probe=%+v err=%v", probe, err)
+	}
+	defer d.Close()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sessionIDs []string
+	for _, root := range []string{filepath.Join(home, ".kimi-code", "sessions"), filepath.Join(home, ".kimi", "sessions")} {
+		_ = filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+			if walkErr != nil || entry.IsDir() || entry.Name() != "wire.jsonl" {
+				return nil
+			}
+			sessionDir := filepath.Dir(path)
+			if filepath.Base(sessionDir) == "main" && filepath.Base(filepath.Dir(sessionDir)) == "agents" {
+				sessionDir = filepath.Dir(filepath.Dir(sessionDir))
+			}
+			sessionIDs = append(sessionIDs, filepath.Base(sessionDir))
+			return nil
+		})
+	}
+	for _, sessionID := range sessionIDs {
+		dataSource := d.NewSessionData(ctx, driver.AgentSpec{}, driver.SessionID(sessionID))
+		raw, rawErr := dataSource.Raw()
+		if rawErr != nil || raw.Format != driver.SessionDataJSONL || len(raw.Data) == 0 {
+			continue
+		}
+		stats, statsErr := dataSource.TokenStatistics()
+		if statsErr == nil && stats.InputTokens > 0 && stats.OutputTokens > 0 {
+			t.Logf("kimi session usage: input=%d output=%d cache_read=%d cache_write=%d",
+				stats.InputTokens, stats.OutputTokens, stats.CacheReadTokens, stats.CacheWriteTokens)
+			return
+		}
+	}
+	t.Skipf("no Kimi session with persisted token statistics found among %d session files", len(sessionIDs))
 }
 
 func TestReal_ACP_KimiProtocol(t *testing.T) {

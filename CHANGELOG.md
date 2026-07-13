@@ -3,7 +3,9 @@
 ## Unreleased
 
 - Added a repository-local `ship` skill for reviewed PR delivery and optional tagged Go module releases.
-
+- Added `Session.Raw` for persisted Claude Code, Codex, Kimi, and TraeX session data.
+- Added `Session.TokenStatistics` for cumulative Claude Code, Codex, Kimi, and TraeX session usage.
+- Distinguished per-turn `Result.Usage` from persisted session statistics.
 - You can now use `MaxSessions` to cap results returned by `Agent.ListSessions`.
 
 - Replaced package-level `Run`/`Start` with long-lived `Agent` instances.
