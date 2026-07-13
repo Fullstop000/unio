@@ -119,7 +119,8 @@ Real E2E tests invoke authenticated CLIs and may consume tokens.
 go generate ./...
 ```
 
-See [docs/GENERATION.md](docs/GENERATION.md) for the generation flow.
+See [docs/SUPPORT_MATRIX_GENERATION.md](docs/SUPPORT_MATRIX_GENERATION.md) for
+the support-matrix generation flow.
 
 ## License
 

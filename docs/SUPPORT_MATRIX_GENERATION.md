@@ -1,10 +1,10 @@
-# Code Generation
+# Support Matrix Generation
 
 ```sh
 go generate ./...
 ```
 
-Support-matrix generation flow:
+Generation flow:
 
 ```text
 support_matrix_generate.go
