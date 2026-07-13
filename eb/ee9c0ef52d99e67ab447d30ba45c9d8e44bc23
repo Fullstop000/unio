@@ -1,0 +1,59 @@
+CHANGELOG.md
+  s_603ee6dacfd6ff::t_6fa0531495e542 5-7
+README.md
+  s_603ee6dacfd6ff::t_2a66acf925cf02 97-102,111-114
+SPEC.md
+  s_603ee6dacfd6ff::t_b27bbb22d20adc 7,130-145
+agent_api_test.go
+  s_603ee6dacfd6ff::t_403ec9e218c081 15-48,54-57,60,144,228,254-308
+docs/API_SUPPORT.md
+  s_603ee6dacfd6ff::t_96bc25d2a392c0 5-11,77,82,86-108,138
+driver/acp/driver_test.go
+  s_603ee6dacfd6ff::t_0124f162941cc3 322-358
+driver/acp/session.go
+  s_603ee6dacfd6ff::t_14aa5ee040b939 230-231,234-242,248-253,256-261,264-272
+driver/acp/session_statistics.go
+  s_603ee6dacfd6ff::t_dcdf4c4d859306 1-283
+driver/acp/session_statistics_test.go
+  s_603ee6dacfd6ff::t_cd980ce63458ad 1-115
+driver/claude/session_data.go
+  s_603ee6dacfd6ff::t_aa0322dc42e3b0 1-122
+driver/claude/session_data_test.go
+  s_603ee6dacfd6ff::t_901ee041bd387e 1-44
+driver/codex/session_data.go
+  s_603ee6dacfd6ff::t_2239f5884ee1f8 1-115
+driver/codex/session_data_test.go
+  s_603ee6dacfd6ff::t_5ff2b6a8fcd535 1-43
+driver/driver.go
+  s_603ee6dacfd6ff::t_dd04704402bd98 310-313,320-337
+driver/fake/fake.go
+  s_603ee6dacfd6ff::t_18d9da0c3d2550 109-122
+facade.go
+  s_603ee6dacfd6ff::t_572d9ccb5bf141 91-108
+session.go
+  s_603ee6dacfd6ff::t_1a1dabd7ad976d 46-101
+tests/real_acp_test.go
+  s_603ee6dacfd6ff::t_c2833c3bfe5b30 8,47-100
+tests/real_claude_test.go
+  s_603ee6dacfd6ff::t_448bf56baa9b70 47-62
+tests/real_codex_test.go
+  s_603ee6dacfd6ff::t_b95087abd2a645 38-45
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ebee9c0ef52d99e67ab447d30ba45c9d8e44bc23",
+  "prompts": {},
+  "sessions": {
+    "s_603ee6dacfd6ff": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4b1f-b12a-75c1-af02-0c3edd4900ad",
+        "model": "unknown"
+      },
+      "human_author": "Fullstop000 <fullstop1005@gmail.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
