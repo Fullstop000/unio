@@ -3,6 +3,9 @@
 ## Unreleased
 
 - Added a repository-local `ship` skill for reviewed PR delivery and optional tagged Go module releases.
+- Bound Agent and Session lifecycles to the context passed to `New`.
+- Simplified driver session creation by removing SDK-generated session keys and
+  per-open Agent configuration.
 - Added `Session.Raw` for persisted Claude Code, Codex, Kimi, and TraeX session data.
 - Added `Session.TokenStatistics` for cumulative Claude Code, Codex, Kimi, and TraeX session usage.
 - Distinguished per-turn `Result.Usage` from persisted session statistics.

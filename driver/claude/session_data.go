@@ -13,16 +13,16 @@ import (
 	"github.com/Fullstop000/unio/driver"
 )
 
-func (h *handle) Raw(ctx context.Context) (driver.RawSessionData, error) {
-	return readClaudeSessionData(ctx, h.dataSessionID())
+func (h *handle) Raw() (driver.RawSessionData, error) {
+	return readClaudeSessionData(h.ctx, h.dataSessionID())
 }
 
-func (h *handle) TokenStatistics(ctx context.Context) (driver.TokenUsage, error) {
-	raw, err := h.Raw(ctx)
+func (h *handle) TokenStatistics() (driver.TokenUsage, error) {
+	raw, err := h.Raw()
 	if err != nil {
 		return driver.TokenUsage{}, err
 	}
-	return parseClaudeTokenStatistics(ctx, raw)
+	return parseClaudeTokenStatistics(h.ctx, raw)
 }
 
 func (h *handle) dataSessionID() driver.SessionID {

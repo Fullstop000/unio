@@ -4,7 +4,7 @@ unio is a multi-language SDK family. Every implementation must expose the same
 human-aligned behavior even though Claude Code and Codex use different runtime
 protocols.
 
-**Spec version: 0.5.0**
+**Spec version: 0.6.0**
 
 ## 1. Public object model
 
@@ -68,6 +68,10 @@ Creating an Agent resolves the concrete runtime and probes availability. A
 missing CLI returns `not_installed`; an unavailable authentication state returns
 an error rather than a half-initialized Agent.
 
+The context passed to `New` owns the Agent lifecycle. Cancelling it closes the
+Agent and every Session derived from it. Agent and Session methods do not accept
+independent operation contexts.
+
 One Agent owns one concrete driver for its lifetime. Multiplexing runtimes such
 as Codex and ACP v1 agents share one child process across that Agent's sessions.
 
@@ -110,10 +114,10 @@ Only one turn may run per Session. A concurrent `Run`, `Stream`, or invalid
 - idle -> interrupt is an idempotent no-op.
 
 Confirmed interruption is normal control flow and sets `Result.Interrupted`.
-Failure to deliver or confirm interruption is an error. Context cancellation
-requests interruption and must not expose idle before runtime confirmation.
-For a manual Stream, the Session remains running until that Stream consumes its
-terminal event; a new turn is rejected before then.
+Failure to deliver or confirm interruption is an error. Cancelling the Agent's
+lifecycle context terminates the Agent instead of acting as a reusable
+per-turn interruption. For a manual Stream, the Session remains running until
+that Stream consumes its terminal event; a new turn is rejected before then.
 
 ### Block and continue
 

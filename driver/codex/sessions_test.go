@@ -30,14 +30,15 @@ func TestListSessionsReadsCodexHistory(t *testing.T) {
 	codexSessionsRoot = func() (string, error) { return root, nil }
 	t.Cleanup(func() { codexSessionsRoot = original })
 
-	got, err := New().ListSessions(context.Background(), driver.ListSessionsParams{Cwd: "/repo/api"})
+	d := New(context.Background(), driver.AgentSpec{})
+	got, err := d.ListSessions(driver.ListSessionsParams{Cwd: "/repo/api"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(got) != 1 || got[0].SessionID != "thread-1" || got[0].Title != "Refactor auth" || got[0].Cwd != "/repo/api" || got[0].MessageCount != 2 || got[0].UpdatedAt.IsZero() {
 		t.Fatalf("sessions = %+v", got)
 	}
-	all, err := New().ListSessions(context.Background(), driver.ListSessionsParams{})
+	all, err := d.ListSessions(driver.ListSessionsParams{})
 	if err != nil || len(all) != 2 {
 		t.Fatalf("all sessions = %+v, err = %v", all, err)
 	}

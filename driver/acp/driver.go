@@ -10,6 +10,8 @@ import (
 
 // Driver implements driver.Driver for one ACP-native runtime.
 type Driver struct {
+	ctx     context.Context
+	spec    driver.AgentSpec
 	cfg     runtimeConfig
 	factory transportFactory
 
@@ -18,24 +20,25 @@ type Driver struct {
 }
 
 // New constructs a shared ACP v1 driver for runtime.
-func New(runtime Runtime) *Driver {
-	return newWithTransport(runtime, spawnTransport)
+func New(ctx context.Context, runtime Runtime, spec driver.AgentSpec) *Driver {
+	return newWithTransport(ctx, runtime, spec, spawnTransport)
 }
 
-func newWithTransport(runtime Runtime, factory transportFactory) *Driver {
-	return &Driver{cfg: configFor(runtime), factory: factory}
+func newWithTransport(ctx context.Context, runtime Runtime, spec driver.AgentSpec, factory transportFactory) *Driver {
+	return &Driver{ctx: ctx, spec: spec, cfg: configFor(runtime), factory: factory}
 }
 
-func (d *Driver) Probe(ctx context.Context) (driver.ProbeAuth, error) {
-	spec := d.cfg.applyDefaults(driver.AgentSpec{})
+func (d *Driver) Probe() (driver.ProbeAuth, error) {
+	spec := d.cfg.applyDefaults(d.spec)
 	if _, err := driver.ResolveExecutable(spec); err != nil {
 		return driver.AuthNotInstalled, nil
 	}
 	return driver.AuthAuthed, nil
 }
 
-func (d *Driver) ListSessions(ctx context.Context, params driver.ListSessionsParams) ([]driver.StoredSessionMeta, error) {
-	spec := d.prepareSpec(params.Spec)
+func (d *Driver) ListSessions(params driver.ListSessionsParams) ([]driver.StoredSessionMeta, error) {
+	ctx := d.ctx
+	spec := d.prepareSpec(params.Cwd)
 	execPath, resolveErr := driver.ResolveExecutable(spec)
 	if resolveErr != nil {
 		return nil, resolveErr
@@ -61,8 +64,8 @@ func (d *Driver) ListSessions(ctx context.Context, params driver.ListSessionsPar
 	return proc.listSessions(ctx, params.Cwd)
 }
 
-func (d *Driver) OpenSession(ctx context.Context, key driver.SessionKey, spec driver.AgentSpec, params driver.OpenParams) (*driver.SessionAttachment, error) {
-	spec = d.prepareSpec(spec)
+func (d *Driver) OpenSession(params driver.OpenParams) (*driver.SessionAttachment, error) {
+	spec := d.prepareSpec(params.Cwd)
 	execPath, resolveErr := driver.ResolveExecutable(spec)
 	if resolveErr != nil {
 		return nil, resolveErr
@@ -74,7 +77,7 @@ func (d *Driver) OpenSession(ctx context.Context, key driver.SessionKey, spec dr
 	}
 	proc := d.process
 	bus := driver.NewEventBus()
-	session := newSession(proc, key, spec, params.ResumeSessionID, bus)
+	session := newSession(d.ctx, proc, spec, params.ResumeSessionID, bus)
 	if !proc.acquire(session) {
 		proc = newProcess(d.cfg, execPath, spec, d.factory)
 		d.process = proc
@@ -98,7 +101,11 @@ func (d *Driver) Close() error {
 	return nil
 }
 
-func (d *Driver) prepareSpec(spec driver.AgentSpec) driver.AgentSpec {
+func (d *Driver) prepareSpec(cwd string) driver.AgentSpec {
+	spec := d.spec
+	if cwd != "" {
+		spec.Cwd = cwd
+	}
 	spec = d.cfg.applyDefaults(spec)
 	if spec.Cwd == "" {
 		spec.Cwd = "."

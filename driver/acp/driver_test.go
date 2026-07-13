@@ -28,8 +28,8 @@ func testAgentSpec() driver.AgentSpec {
 }
 
 func TestDriverBasicsAndRuntimeConfiguration(t *testing.T) {
-	d := New(Runtime("definitely-not-installed-unio-test"))
-	probe, err := d.Probe(context.Background())
+	d := New(context.Background(), Runtime("definitely-not-installed-unio-test"), driver.AgentSpec{})
+	probe, err := d.Probe()
 	if err != nil || probe != driver.AuthNotInstalled {
 		t.Fatalf("probe=%+v err=%v", probe, err)
 	}
@@ -74,7 +74,9 @@ func TestDriverBasicsAndRuntimeConfiguration(t *testing.T) {
 
 func TestOpenCodeSetsModelViaSessionConfig(t *testing.T) {
 	var selected string
-	d := newWithTransport(OpenCode, scriptedFactory(t, func(msg map[string]json.RawMessage, send func(any)) {
+	spec := testAgentSpec()
+	spec.Model = "deepseek/deepseek-v4-flash"
+	d := newWithTransport(context.Background(), OpenCode, spec, scriptedFactory(t, func(msg map[string]json.RawMessage, send func(any)) {
 		switch rawString(msg["method"]) {
 		case "initialize":
 			send(response(msg["id"], map[string]any{"protocolVersion": 1, "agentCapabilities": map[string]any{}}))
@@ -94,19 +96,17 @@ func TestOpenCodeSetsModelViaSessionConfig(t *testing.T) {
 			send(response(msg["id"], map[string]any{"configOptions": []any{}}))
 		}
 	}))
-	spec := testAgentSpec()
-	spec.Model = "deepseek/deepseek-v4-flash"
-	att, err := d.OpenSession(context.Background(), "key", spec, driver.OpenParams{})
+	att, err := d.OpenSession(driver.OpenParams{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := att.Session.Run(context.Background(), nil); err != nil {
+	if err := att.Session.Run(nil); err != nil {
 		t.Fatal(err)
 	}
 	if selected != spec.Model {
 		t.Fatalf("selected model = %q", selected)
 	}
-	if err := att.Session.Close(context.Background()); err != nil {
+	if err := att.Session.Close(); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -139,53 +139,50 @@ func TestProcessTransportRoundTripAndKill(t *testing.T) {
 }
 
 func TestInitializationRejectsUnsupportedProtocolVersion(t *testing.T) {
-	d := newWithTransport(TraeX, scriptedFactory(t, func(msg map[string]json.RawMessage, send func(any)) {
+	d := newWithTransport(context.Background(), TraeX, testAgentSpec(), scriptedFactory(t, func(msg map[string]json.RawMessage, send func(any)) {
 		if rawString(msg["method"]) == "initialize" {
 			send(response(msg["id"], map[string]any{"protocolVersion": 2, "agentCapabilities": map[string]any{}}))
 		}
 	}))
-	att, err := d.OpenSession(context.Background(), "key", testAgentSpec(), driver.OpenParams{})
+	att, err := d.OpenSession(driver.OpenParams{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := att.Session.Run(context.Background(), nil); !errors.Is(err, driver.NewUnsupportedError("")) {
+	if err := att.Session.Run(nil); !errors.Is(err, driver.NewUnsupportedError("")) {
 		t.Fatalf("Run error = %v", err)
 	}
 }
 
 func TestResumeRequiresRuntimeCapability(t *testing.T) {
-	d := newWithTransport(TraeX, scriptedFactory(t, func(msg map[string]json.RawMessage, send func(any)) {
+	d := newWithTransport(context.Background(), TraeX, testAgentSpec(), scriptedFactory(t, func(msg map[string]json.RawMessage, send func(any)) {
 		if rawString(msg["method"]) == "initialize" {
 			send(response(msg["id"], map[string]any{"protocolVersion": 1, "agentCapabilities": map[string]any{}}))
 		}
 	}))
-	att, err := d.OpenSession(context.Background(), "key", testAgentSpec(), driver.OpenParams{ResumeSessionID: "old"})
+	att, err := d.OpenSession(driver.OpenParams{ResumeSessionID: "old"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if att.Session.Key() != "key" {
-		t.Fatalf("key = %q", att.Session.Key())
-	}
-	if err := att.Session.Run(context.Background(), nil); !errors.Is(err, driver.NewUnsupportedError("")) {
+	if err := att.Session.Run(nil); !errors.Is(err, driver.NewUnsupportedError("")) {
 		t.Fatalf("Run error = %v", err)
 	}
-	if err := att.Session.Close(context.Background()); err != nil {
+	if err := att.Session.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err := att.Session.Run(context.Background(), nil); !errors.Is(err, driver.NewInvalidStateError("")) {
+	if err := att.Session.Run(nil); !errors.Is(err, driver.NewInvalidStateError("")) {
 		t.Fatalf("Run after Close error = %v", err)
 	}
-	if _, err := att.Session.Prompt(context.Background(), driver.PromptReq{Text: "closed"}); !errors.Is(err, driver.NewInvalidStateError("")) {
+	if _, err := att.Session.Prompt(driver.PromptReq{Text: "closed"}); !errors.Is(err, driver.NewInvalidStateError("")) {
 		t.Fatalf("Prompt after Close error = %v", err)
 	}
-	if _, err := att.Session.Continue(context.Background(), "anything"); !errors.Is(err, driver.NewInvalidStateError("")) {
+	if _, err := att.Session.Continue("anything"); !errors.Is(err, driver.NewInvalidStateError("")) {
 		t.Fatalf("Continue after Close error = %v", err)
 	}
 }
 
 func TestListSessionsFiltersAndExhaustsCursor(t *testing.T) {
 	var cursors []string
-	d := newWithTransport(Kimi, scriptedFactory(t, func(msg map[string]json.RawMessage, send func(any)) {
+	d := newWithTransport(context.Background(), Kimi, testAgentSpec(), scriptedFactory(t, func(msg map[string]json.RawMessage, send func(any)) {
 		method := rawString(msg["method"])
 		switch method {
 		case "initialize":
@@ -218,10 +215,7 @@ func TestListSessionsFiltersAndExhaustsCursor(t *testing.T) {
 		}
 	}))
 
-	got, err := d.ListSessions(context.Background(), driver.ListSessionsParams{
-		Cwd:  "/repo",
-		Spec: testAgentSpec(),
-	})
+	got, err := d.ListSessions(driver.ListSessionsParams{Cwd: "/repo"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,12 +231,12 @@ func TestListSessionsFiltersAndExhaustsCursor(t *testing.T) {
 }
 
 func TestListSessionsRequiresAdvertisedCapability(t *testing.T) {
-	d := newWithTransport(TraeX, scriptedFactory(t, func(msg map[string]json.RawMessage, send func(any)) {
+	d := newWithTransport(context.Background(), TraeX, testAgentSpec(), scriptedFactory(t, func(msg map[string]json.RawMessage, send func(any)) {
 		if rawString(msg["method"]) == "initialize" {
 			send(response(msg["id"], map[string]any{"protocolVersion": 1, "agentCapabilities": map[string]any{}}))
 		}
 	}))
-	_, err := d.ListSessions(context.Background(), driver.ListSessionsParams{Cwd: "/repo", Spec: testAgentSpec()})
+	_, err := d.ListSessions(driver.ListSessionsParams{Cwd: "/repo"})
 	if !errors.Is(err, driver.NewUnsupportedError("")) {
 		t.Fatalf("ListSessions error = %v", err)
 	}
@@ -250,7 +244,7 @@ func TestListSessionsRequiresAdvertisedCapability(t *testing.T) {
 
 func TestPermissionBecomesBlockedAndContinueResumesTurn(t *testing.T) {
 	var promptID json.RawMessage
-	d := newWithTransport(Kimi, scriptedFactory(t, func(msg map[string]json.RawMessage, send func(any)) {
+	d := newWithTransport(context.Background(), Kimi, testAgentSpec(), scriptedFactory(t, func(msg map[string]json.RawMessage, send func(any)) {
 		switch rawString(msg["method"]) {
 		case "initialize":
 			send(response(msg["id"], map[string]any{"protocolVersion": 1, "agentCapabilities": map[string]any{}}))
@@ -284,15 +278,15 @@ func TestPermissionBecomesBlockedAndContinueResumesTurn(t *testing.T) {
 		}
 	}))
 
-	att, err := d.OpenSession(context.Background(), "key", testAgentSpec(), driver.OpenParams{})
+	att, err := d.OpenSession(driver.OpenParams{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	events := att.Events.Subscribe()
-	if err := att.Session.Run(context.Background(), nil); err != nil {
+	if err := att.Session.Run(nil); err != nil {
 		t.Fatal(err)
 	}
-	run1, err := att.Session.Prompt(context.Background(), driver.PromptReq{Text: "change it"})
+	run1, err := att.Session.Prompt(driver.PromptReq{Text: "change it"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -300,7 +294,7 @@ func TestPermissionBecomesBlockedAndContinueResumesTurn(t *testing.T) {
 	if blocked.RunID != run1 || blocked.Blocked == nil || len(blocked.Blocked.Options) != 2 || blocked.Blocked.Options[0].Value != "once" {
 		t.Fatalf("blocked = %+v", blocked)
 	}
-	run2, err := att.Session.Continue(context.Background(), "once")
+	run2, err := att.Session.Continue("once")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -318,7 +312,7 @@ func TestPermissionBecomesBlockedAndContinueResumesTurn(t *testing.T) {
 
 func TestInterruptWaitsForCancelledPromptResponse(t *testing.T) {
 	var promptID json.RawMessage
-	d := newWithTransport(OpenCode, scriptedFactory(t, func(msg map[string]json.RawMessage, send func(any)) {
+	d := newWithTransport(context.Background(), OpenCode, testAgentSpec(), scriptedFactory(t, func(msg map[string]json.RawMessage, send func(any)) {
 		switch rawString(msg["method"]) {
 		case "initialize":
 			send(response(msg["id"], map[string]any{"protocolVersion": 1, "agentCapabilities": map[string]any{}}))
@@ -331,20 +325,18 @@ func TestInterruptWaitsForCancelledPromptResponse(t *testing.T) {
 		}
 	}))
 
-	att, err := d.OpenSession(context.Background(), "key", testAgentSpec(), driver.OpenParams{})
+	att, err := d.OpenSession(driver.OpenParams{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	events := att.Events.Subscribe()
-	if err := att.Session.Run(context.Background(), nil); err != nil {
+	if err := att.Session.Run(nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := att.Session.Prompt(context.Background(), driver.PromptReq{Text: "wait"}); err != nil {
+	if _, err := att.Session.Prompt(driver.PromptReq{Text: "wait"}); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	if err := att.Session.Interrupt(ctx); err != nil {
+	if err := att.Session.Interrupt(); err != nil {
 		t.Fatal(err)
 	}
 	completed := waitEvent(t, events, driver.EventCompleted)
@@ -357,7 +349,7 @@ func TestInterruptWaitsForCancelledPromptResponse(t *testing.T) {
 }
 
 func TestResumeUsesCapabilityAndKeepsRequestedID(t *testing.T) {
-	d := newWithTransport(TraeX, scriptedFactory(t, func(msg map[string]json.RawMessage, send func(any)) {
+	d := newWithTransport(context.Background(), TraeX, testAgentSpec(), scriptedFactory(t, func(msg map[string]json.RawMessage, send func(any)) {
 		switch rawString(msg["method"]) {
 		case "initialize":
 			send(response(msg["id"], map[string]any{
@@ -377,24 +369,24 @@ func TestResumeUsesCapabilityAndKeepsRequestedID(t *testing.T) {
 			send(response(msg["id"], nil))
 		}
 	}))
-	att, err := d.OpenSession(context.Background(), "key", testAgentSpec(), driver.OpenParams{ResumeSessionID: "existing"})
+	att, err := d.OpenSession(driver.OpenParams{ResumeSessionID: "existing"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	_ = att.Events.Subscribe()
-	if err := att.Session.Run(context.Background(), nil); err != nil {
+	if err := att.Session.Run(nil); err != nil {
 		t.Fatal(err)
 	}
 	if att.Session.SessionID() != "existing" {
 		t.Fatalf("session ID = %q", att.Session.SessionID())
 	}
-	if err := att.Session.Close(context.Background()); err != nil {
+	if err := att.Session.Close(); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestResumeFallsBackToSessionLoad(t *testing.T) {
-	d := newWithTransport(Kimi, scriptedFactory(t, func(msg map[string]json.RawMessage, send func(any)) {
+	d := newWithTransport(context.Background(), Kimi, testAgentSpec(), scriptedFactory(t, func(msg map[string]json.RawMessage, send func(any)) {
 		switch rawString(msg["method"]) {
 		case "initialize":
 			send(response(msg["id"], map[string]any{
@@ -405,24 +397,24 @@ func TestResumeFallsBackToSessionLoad(t *testing.T) {
 			send(response(msg["id"], nil))
 		}
 	}))
-	att, err := d.OpenSession(context.Background(), "key", testAgentSpec(), driver.OpenParams{ResumeSessionID: "existing"})
+	att, err := d.OpenSession(driver.OpenParams{ResumeSessionID: "existing"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	_ = att.Events.Subscribe()
-	if err := att.Session.Run(context.Background(), nil); err != nil {
+	if err := att.Session.Run(nil); err != nil {
 		t.Fatal(err)
 	}
 	if att.Session.SessionID() != "existing" {
 		t.Fatalf("session ID = %q", att.Session.SessionID())
 	}
-	if err := att.Session.Close(context.Background()); err != nil {
+	if err := att.Session.Close(); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestToolCallUpdateIsCoalescedBeforeEmission(t *testing.T) {
-	d := newWithTransport(TraeX, scriptedFactory(t, func(msg map[string]json.RawMessage, send func(any)) {
+	d := newWithTransport(context.Background(), TraeX, testAgentSpec(), scriptedFactory(t, func(msg map[string]json.RawMessage, send func(any)) {
 		switch rawString(msg["method"]) {
 		case "initialize":
 			send(response(msg["id"], map[string]any{"protocolVersion": 1, "agentCapabilities": map[string]any{}}))
@@ -444,15 +436,15 @@ func TestToolCallUpdateIsCoalescedBeforeEmission(t *testing.T) {
 			send(response(msg["id"], map[string]any{"stopReason": "end_turn"}))
 		}
 	}))
-	att, err := d.OpenSession(context.Background(), "key", testAgentSpec(), driver.OpenParams{})
+	att, err := d.OpenSession(driver.OpenParams{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	events := att.Events.Subscribe()
-	if err := att.Session.Run(context.Background(), nil); err != nil {
+	if err := att.Session.Run(nil); err != nil {
 		t.Fatal(err)
 	}
-	runID, err := att.Session.Prompt(context.Background(), driver.PromptReq{Text: "read"})
+	runID, err := att.Session.Prompt(driver.PromptReq{Text: "read"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -480,13 +472,14 @@ func TestToolCallUpdateIsCoalescedBeforeEmission(t *testing.T) {
 	if call.Tool != "read_file" || !ok || input["path"] != "main.go" || result.Text != "package main" {
 		t.Fatalf("call=%+v result=%+v", call, result)
 	}
-	if err := att.Session.Close(context.Background()); err != nil {
+	if err := att.Session.Close(); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func TestCloseWithCancelledContextStillReleasesSession(t *testing.T) {
-	d := newWithTransport(TraeX, scriptedFactory(t, func(msg map[string]json.RawMessage, send func(any)) {
+func TestCloseAfterLifecycleCancellationStillReleasesSession(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	d := newWithTransport(ctx, TraeX, testAgentSpec(), scriptedFactory(t, func(msg map[string]json.RawMessage, send func(any)) {
 		switch rawString(msg["method"]) {
 		case "initialize":
 			send(response(msg["id"], map[string]any{"protocolVersion": 1, "agentCapabilities": map[string]any{}}))
@@ -494,20 +487,19 @@ func TestCloseWithCancelledContextStillReleasesSession(t *testing.T) {
 			send(response(msg["id"], map[string]any{"sessionId": "s1"}))
 		}
 	}))
-	att, err := d.OpenSession(context.Background(), "key", testAgentSpec(), driver.OpenParams{})
+	att, err := d.OpenSession(driver.OpenParams{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	_ = att.Events.Subscribe()
-	if err := att.Session.Run(context.Background(), nil); err != nil {
+	if err := att.Session.Run(nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := att.Session.Prompt(context.Background(), driver.PromptReq{Text: "wait"}); err != nil {
+	if _, err := att.Session.Prompt(driver.PromptReq{Text: "wait"}); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := att.Session.Close(ctx); !errors.Is(err, context.Canceled) {
+	if err := att.Session.Close(); err != nil {
 		t.Fatalf("Close error = %v", err)
 	}
 	if state := att.Session.ProcessState(); state.Phase != driver.PhaseClosed {

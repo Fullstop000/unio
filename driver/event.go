@@ -8,7 +8,7 @@ type EventType string
 const (
 	// EventLifecycle: the session transitioned to a new ProcessState.
 	EventLifecycle EventType = "lifecycle"
-	// EventSessionAttached: a session id was attached (new or resumed) for the key.
+	// EventSessionAttached: a runtime session id was attached (new or resumed).
 	EventSessionAttached EventType = "session_attached"
 	// EventOutput: one content item from an in-flight run (see AgentEventItem).
 	EventOutput EventType = "output"
@@ -55,14 +55,13 @@ type AgentEventItem struct {
 // flattened union of Chorus's DriverEvent variants: Type selects which fields
 // are meaningful.
 //
-//   - EventLifecycle       → Key, State
-//   - EventSessionAttached → Key, SessionID
-//   - EventOutput          → Key, SessionID, RunID, Item
-//   - EventCompleted       → Key, SessionID, RunID, Result
-//   - EventFailed          → Key, SessionID, RunID, Err
+//   - EventLifecycle       → State
+//   - EventSessionAttached → SessionID
+//   - EventOutput          → SessionID, RunID, Item
+//   - EventCompleted       → SessionID, RunID, Result
+//   - EventFailed          → SessionID, RunID, Err
 type AgentEvent struct {
 	Type      EventType
-	Key       SessionKey
 	SessionID SessionID
 	RunID     RunID
 
@@ -81,33 +80,33 @@ type AgentEvent struct {
 // --- constructor helpers (used by drivers to keep call sites terse) ---
 
 // LifecycleEvent builds an EventLifecycle.
-func LifecycleEvent(key SessionKey, state ProcessState) AgentEvent {
-	return AgentEvent{Type: EventLifecycle, Key: key, State: state, SessionID: state.SessionID, RunID: state.RunID}
+func LifecycleEvent(state ProcessState) AgentEvent {
+	return AgentEvent{Type: EventLifecycle, State: state, SessionID: state.SessionID, RunID: state.RunID}
 }
 
 // SessionAttachedEvent builds an EventSessionAttached.
-func SessionAttachedEvent(key SessionKey, sid SessionID) AgentEvent {
-	return AgentEvent{Type: EventSessionAttached, Key: key, SessionID: sid}
+func SessionAttachedEvent(sid SessionID) AgentEvent {
+	return AgentEvent{Type: EventSessionAttached, SessionID: sid}
 }
 
 // OutputEvent builds an EventOutput.
-func OutputEvent(key SessionKey, sid SessionID, run RunID, item AgentEventItem) AgentEvent {
-	return AgentEvent{Type: EventOutput, Key: key, SessionID: sid, RunID: run, Item: item}
+func OutputEvent(sid SessionID, run RunID, item AgentEventItem) AgentEvent {
+	return AgentEvent{Type: EventOutput, SessionID: sid, RunID: run, Item: item}
 }
 
 // CompletedEvent builds an EventCompleted.
-func CompletedEvent(key SessionKey, sid SessionID, run RunID, result RunResult) AgentEvent {
-	return AgentEvent{Type: EventCompleted, Key: key, SessionID: sid, RunID: run, Result: result}
+func CompletedEvent(sid SessionID, run RunID, result RunResult) AgentEvent {
+	return AgentEvent{Type: EventCompleted, SessionID: sid, RunID: run, Result: result}
 }
 
 // FailedEvent builds an EventFailed.
-func FailedEvent(key SessionKey, sid SessionID, run RunID, err *AgentError) AgentEvent {
-	return AgentEvent{Type: EventFailed, Key: key, SessionID: sid, RunID: run, Err: err}
+func FailedEvent(sid SessionID, run RunID, err *AgentError) AgentEvent {
+	return AgentEvent{Type: EventFailed, SessionID: sid, RunID: run, Err: err}
 }
 
 // BlockedEvent builds an EventBlocked.
-func BlockedEvent(key SessionKey, sid SessionID, run RunID, reason BlockedReason) AgentEvent {
-	return AgentEvent{Type: EventBlocked, Key: key, SessionID: sid, RunID: run, Blocked: &reason}
+func BlockedEvent(sid SessionID, run RunID, reason BlockedReason) AgentEvent {
+	return AgentEvent{Type: EventBlocked, SessionID: sid, RunID: run, Blocked: &reason}
 }
 
 // TypeName returns a short human-readable name for logging.

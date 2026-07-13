@@ -13,38 +13,47 @@ import (
 // is process-per-session, so the driver holds no shared child; each session owns
 // its own. The factory field lets tests inject a scripted transport.
 type Driver struct {
+	ctx     context.Context
+	spec    driver.AgentSpec
 	factory transportFactory
 }
 
 // New constructs a Claude driver using the real `claude` process transport.
-func New() *Driver {
-	return &Driver{factory: spawnProcTransport}
+func New(ctx context.Context, spec driver.AgentSpec) *Driver {
+	return &Driver{ctx: ctx, spec: spec, factory: spawnProcTransport}
 }
 
 // newWithTransport constructs a driver with an injected transport factory (used
 // by integration tests).
-func newWithTransport(f transportFactory) *Driver {
-	return &Driver{factory: f}
+func newWithTransport(ctx context.Context, spec driver.AgentSpec, f transportFactory) *Driver {
+	return &Driver{ctx: ctx, spec: spec, factory: f}
 }
 
 // Probe reports installed/authed state. Auth beyond "installed" is not
 // separately detectable without a network call, so a present binary reports
 // authed; a missing one reports not-installed.
-func (d *Driver) Probe(ctx context.Context) (driver.ProbeAuth, error) {
-	spec := driver.AgentSpec{ExecutablePath: "claude"}
+func (d *Driver) Probe() (driver.ProbeAuth, error) {
+	spec := d.spec
+	if spec.ExecutablePath == "" {
+		spec.ExecutablePath = "claude"
+	}
 	if _, err := driver.ResolveExecutable(spec); err != nil {
 		return driver.AuthNotInstalled, nil
 	}
 	return driver.AuthAuthed, nil
 }
 
-func (d *Driver) ListSessions(ctx context.Context, params driver.ListSessionsParams) ([]driver.StoredSessionMeta, error) {
-	return listStoredSessions(ctx, params.Cwd)
+func (d *Driver) ListSessions(params driver.ListSessionsParams) ([]driver.StoredSessionMeta, error) {
+	return listStoredSessions(d.ctx, params.Cwd)
 }
 
 // OpenSession resolves the executable (surfacing not_installed early) and builds
 // an idle session handle. It does not spawn until Run.
-func (d *Driver) OpenSession(ctx context.Context, key driver.SessionKey, spec driver.AgentSpec, params driver.OpenParams) (*driver.SessionAttachment, error) {
+func (d *Driver) OpenSession(params driver.OpenParams) (*driver.SessionAttachment, error) {
+	spec := d.spec
+	if params.Cwd != "" {
+		spec.Cwd = params.Cwd
+	}
 	if spec.ExecutablePath == "" {
 		spec.ExecutablePath = "claude"
 	}
@@ -58,7 +67,7 @@ func (d *Driver) OpenSession(ctx context.Context, key driver.SessionKey, spec dr
 
 	bus := driver.NewEventBus()
 	h := &handle{
-		key:      key,
+		ctx:      d.ctx,
 		spec:     spec,
 		execPath: execPath,
 		resume:   params.ResumeSessionID,
@@ -72,7 +81,7 @@ func (d *Driver) OpenSession(ctx context.Context, key driver.SessionKey, spec dr
 
 // handle is one Claude session (one child process). Implements driver.Session.
 type handle struct {
-	key      driver.SessionKey
+	ctx      context.Context
 	spec     driver.AgentSpec
 	execPath string
 	resume   driver.SessionID
@@ -105,8 +114,6 @@ type handle struct {
 	done chan struct{}
 }
 
-func (h *handle) Key() driver.SessionKey { return h.key }
-
 func (h *handle) SessionID() driver.SessionID {
 	if p := h.sessionID.Load(); p != nil {
 		return *p
@@ -123,7 +130,7 @@ func (h *handle) ProcessState() driver.ProcessState {
 
 func (h *handle) setState(st driver.ProcessState) {
 	h.state.Store(&st)
-	h.bus.Emit(driver.LifecycleEvent(h.key, st))
+	h.bus.Emit(driver.LifecycleEvent(st))
 }
 
 func (h *handle) setSessionID(sid string) {
@@ -155,7 +162,8 @@ func (h *handle) buildArgs() []string {
 
 // Run spawns the child and starts the reader loop. If initPrompt is provided it
 // is sent as the first user message (Claude requires stdin to emit system.init).
-func (h *handle) Run(ctx context.Context, initPrompt *driver.PromptReq) error {
+func (h *handle) Run(initPrompt *driver.PromptReq) error {
+	ctx := h.ctx
 	h.lmu.Lock()
 	if h.lclosed {
 		h.lmu.Unlock()
@@ -196,7 +204,7 @@ func (h *handle) Run(ctx context.Context, initPrompt *driver.PromptReq) error {
 	h.lmu.Unlock()
 
 	if initPrompt != nil {
-		if _, err := h.Prompt(ctx, *initPrompt); err != nil {
+		if _, err := h.Prompt(*initPrompt); err != nil {
 			return err
 		}
 	}
@@ -205,7 +213,7 @@ func (h *handle) Run(ctx context.Context, initPrompt *driver.PromptReq) error {
 
 // Prompt writes a user-message line to stdin and marks the turn in flight. The
 // resulting Output/Completed events arrive via the reader loop.
-func (h *handle) Prompt(ctx context.Context, req driver.PromptReq) (driver.RunID, error) {
+func (h *handle) Prompt(req driver.PromptReq) (driver.RunID, error) {
 	h.lmu.Lock()
 	defer h.lmu.Unlock()
 	if h.lclosed {
@@ -247,7 +255,8 @@ func (h *handle) Prompt(ctx context.Context, req driver.PromptReq) (driver.RunID
 
 // Interrupt terminates the active headless process. The public session can
 // transparently resume the runtime-owned session id on its next turn.
-func (h *handle) Interrupt(ctx context.Context) error {
+func (h *handle) Interrupt() error {
+	ctx := h.ctx
 	h.lmu.Lock()
 	if h.lclosed {
 		h.lmu.Unlock()
@@ -291,13 +300,14 @@ func (h *handle) Interrupt(ctx context.Context) error {
 
 // Continue returns unsupported because this transport cannot currently emit a
 // blocked permission/user-input event.
-func (h *handle) Continue(ctx context.Context, input string) (driver.RunID, error) {
+func (h *handle) Continue(input string) (driver.RunID, error) {
 	return "", driver.NewUnsupportedError("claude: no blocked turn")
 }
 
 // Close terminates the child and closes the event bus. Idempotent; after Close,
 // Run/Prompt return an error.
-func (h *handle) Close(ctx context.Context) error {
+func (h *handle) Close() error {
+	ctx := context.WithoutCancel(h.ctx)
 	h.lmu.Lock()
 	if h.lclosed {
 		h.lmu.Unlock()
@@ -362,8 +372,8 @@ func (h *handle) readerLoop() {
 		if h.interrupted.Swap(false) {
 			finish = driver.FinishCancelled
 		}
-		h.bus.Emit(driver.OutputEvent(h.key, h.SessionID(), run, driver.AgentEventItem{Kind: driver.ItemTurnEnd}))
-		h.bus.Emit(driver.CompletedEvent(h.key, h.SessionID(), run, driver.RunResult{FinishReason: finish}))
+		h.bus.Emit(driver.OutputEvent(h.SessionID(), run, driver.AgentEventItem{Kind: driver.ItemTurnEnd}))
+		h.bus.Emit(driver.CompletedEvent(h.SessionID(), run, driver.RunResult{FinishReason: finish}))
 	}
 }
 
@@ -376,7 +386,7 @@ func (h *handle) handleLine(line string) {
 	case EvSystemInit:
 		if ev.SessionID != "" {
 			h.setSessionID(ev.SessionID)
-			h.bus.Emit(driver.SessionAttachedEvent(h.key, ev.SessionID))
+			h.bus.Emit(driver.SessionAttachedEvent(ev.SessionID))
 			h.setState(driver.ProcessState{Phase: driver.PhaseActive, SessionID: ev.SessionID})
 		}
 	case EvThinkingDelta:
@@ -434,7 +444,7 @@ func (h *handle) finishTurn(run driver.RunID, ev HeadlessEvent) {
 
 	if ev.IsError {
 		aerr := driver.NewRuntimeReportedError(ev.Result)
-		h.bus.Emit(driver.FailedEvent(h.key, h.SessionID(), run, aerr))
+		h.bus.Emit(driver.FailedEvent(h.SessionID(), run, aerr))
 	} else {
 		result := driver.RunResult{
 			FinishReason: driver.FinishNatural,
@@ -451,14 +461,14 @@ func (h *handle) finishTurn(run driver.RunID, ev HeadlessEvent) {
 				},
 			}
 		}
-		h.bus.Emit(driver.CompletedEvent(h.key, h.SessionID(), run, result))
+		h.bus.Emit(driver.CompletedEvent(h.SessionID(), run, result))
 	}
 	h.curRun.Store(ptr(""))
 	h.setState(driver.ProcessState{Phase: driver.PhaseActive, SessionID: h.SessionID()})
 }
 
 func (h *handle) emitItem(run driver.RunID, item driver.AgentEventItem) {
-	h.bus.Emit(driver.OutputEvent(h.key, h.SessionID(), run, item))
+	h.bus.Emit(driver.OutputEvent(h.SessionID(), run, item))
 }
 
 func (h *handle) currentRun() driver.RunID {

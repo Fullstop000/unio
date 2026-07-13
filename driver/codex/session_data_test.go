@@ -28,12 +28,12 @@ func TestRawSessionDataAndTokenStatistics(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	session := &session{resume: "session-id"}
-	raw, err := session.Raw(context.Background())
+	session := &session{ctx: context.Background(), resume: "session-id"}
+	raw, err := session.Raw()
 	if err != nil || raw.Format != driver.SessionDataJSONL || string(raw.Data) != string(data) {
 		t.Fatalf("raw = %+v, error = %v", raw, err)
 	}
-	got, err := session.TokenStatistics(context.Background())
+	got, err := session.TokenStatistics()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func TestRawSessionDataPreservesCancellation(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err := (&session{resume: "session-id"}).Raw(ctx)
+	_, err := (&session{ctx: ctx, resume: "session-id"}).Raw()
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("error = %v; want context.Canceled", err)
 	}

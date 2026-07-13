@@ -26,7 +26,6 @@
 package driver
 
 import (
-	"context"
 	"time"
 
 	"github.com/Fullstop000/unio/errs"
@@ -204,9 +203,6 @@ type StoredSessionMeta struct {
 type ListSessionsParams struct {
 	// Cwd filters sessions by absolute working directory. Empty means all.
 	Cwd string
-	// Spec configures runtimes that must be started to enumerate sessions.
-	// Disk-backed drivers may ignore it.
-	Spec AgentSpec
 }
 
 // Attachment is a piece of non-text content attached to a prompt.
@@ -232,13 +228,16 @@ type PromptReq struct {
 // means start a fresh one.
 type OpenParams struct {
 	ResumeSessionID SessionID
+	// Cwd overrides the Agent's working directory for this session. It is used
+	// when resuming a persisted session that belongs to another workspace.
+	Cwd string
 }
 
 // IsResume reports whether these params request a resume.
 func (p OpenParams) IsResume() bool { return p.ResumeSessionID != "" }
 
-// AgentSpec is everything a driver needs to open a session on an agent. It is
-// transport-agnostic; each driver reads the subset it understands.
+// AgentSpec is the transport-agnostic configuration injected into one concrete
+// Driver when its Agent is created. Each driver reads the subset it understands.
 type AgentSpec struct {
 	// ExecutablePath is the CLI binary to run (may be a bare name resolved on PATH).
 	ExecutablePath string
@@ -265,24 +264,23 @@ type SessionAttachment struct {
 	Events  *EventBus
 }
 
-// Driver is the runtime-level factory. One instance per runtime kind
-// (Claude, Codex, an ACP agent, Fake). It owns session lifecycle: OpenSession
-// yields a fresh Session (new or resumed).
+// Driver implements one Agent's runtime behavior. The Agent owns one concrete
+// Driver, and OpenSession yields its fresh or resumed Session handles.
 //
-// Implementations must be safe for concurrent use: a host may open sessions for
-// several agents of the same runtime kind at once.
+// Implementations must be safe for concurrent use: one Agent may own several
+// sessions at once.
 type Driver interface {
 	// Probe detects whether the runtime is installed and authenticated.
-	Probe(ctx context.Context) (ProbeAuth, error)
+	Probe() (ProbeAuth, error)
 
 	// ListSessions enumerates previously-stored sessions for this runtime on
 	// this host. Drivers that cannot enumerate return an unsupported error.
-	ListSessions(ctx context.Context, params ListSessionsParams) ([]StoredSessionMeta, error)
+	ListSessions(params ListSessionsParams) ([]StoredSessionMeta, error)
 
-	// OpenSession opens a session for the given key. The returned Session is in
+	// OpenSession opens a new or persisted session. The returned Session is in
 	// PhaseIdle; the caller must invoke Session.Run to bring it online.
 	// OpenParams.ResumeSessionID selects new-vs-resume.
-	OpenSession(ctx context.Context, key SessionKey, spec AgentSpec, params OpenParams) (*SessionAttachment, error)
+	OpenSession(params OpenParams) (*SessionAttachment, error)
 }
 
 // SessionDataFormat identifies a persisted session representation.
@@ -303,9 +301,6 @@ type RawSessionData struct {
 // Implementations serialise mutating calls internally; callers do not need an
 // external lock just to keep one session safe.
 type Session interface {
-	// Key returns the session key this handle belongs to.
-	Key() SessionKey
-
 	// SessionID returns the runtime-assigned session id, or "" before Run has
 	// attached one. This is the value used for later resume.
 	SessionID() SessionID
@@ -314,30 +309,30 @@ type Session interface {
 	ProcessState() ProcessState
 
 	// Raw returns the runtime-owned persisted representation of this session.
-	Raw(ctx context.Context) (RawSessionData, error)
+	Raw() (RawSessionData, error)
 
 	// TokenStatistics returns cumulative usage parsed from Raw.
-	TokenStatistics(ctx context.Context) (TokenUsage, error)
+	TokenStatistics() (TokenUsage, error)
 
 	// Run brings the session online (spawning or attaching the runtime as
 	// needed). If initPrompt is non-nil it is delivered as the first turn so
 	// runtimes can bootstrap in one round-trip. Resume intent was threaded in
 	// via OpenSession's OpenParams.
-	Run(ctx context.Context, initPrompt *PromptReq) error
+	Run(initPrompt *PromptReq) error
 
 	// Prompt sends a prompt to the live session and returns the RunID assigned
 	// so callers can correlate the subsequent Output/Completed events.
-	Prompt(ctx context.Context, req PromptReq) (RunID, error)
+	Prompt(req PromptReq) (RunID, error)
 
 	// Continue supplies external input to a blocked run and returns the new SDK
 	// run id used to correlate events after the pause.
-	Continue(ctx context.Context, input string) (RunID, error)
+	Continue(input string) (RunID, error)
 
 	// Interrupt stops the active or blocked turn. It is an idempotent no-op when
 	// no turn is active.
-	Interrupt(ctx context.Context) error
+	Interrupt() error
 
 	// Close shuts this session down and releases its resources. It does not
 	// tear down a shared runtime process while sibling sessions remain live.
-	Close(ctx context.Context) error
+	Close() error
 }

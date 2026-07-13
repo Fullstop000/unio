@@ -12,8 +12,8 @@ import (
 )
 
 type session struct {
+	ctx    context.Context
 	proc   *process
-	key    driver.SessionKey
 	spec   driver.AgentSpec
 	resume driver.SessionID
 	bus    *driver.EventBus
@@ -49,13 +49,11 @@ type pendingToolCall struct {
 	input any
 }
 
-func newSession(proc *process, key driver.SessionKey, spec driver.AgentSpec, resume driver.SessionID, bus *driver.EventBus) *session {
-	s := &session{proc: proc, key: key, spec: spec, resume: resume, bus: bus}
+func newSession(ctx context.Context, proc *process, spec driver.AgentSpec, resume driver.SessionID, bus *driver.EventBus) *session {
+	s := &session{ctx: ctx, proc: proc, spec: spec, resume: resume, bus: bus}
 	s.state.Store(&driver.ProcessState{Phase: driver.PhaseIdle})
 	return s
 }
-
-func (s *session) Key() driver.SessionKey { return s.key }
 
 func (s *session) SessionID() driver.SessionID {
 	if id := s.sessionID.Load(); id != nil {
@@ -73,10 +71,11 @@ func (s *session) ProcessState() driver.ProcessState {
 
 func (s *session) setState(state driver.ProcessState) {
 	s.state.Store(&state)
-	s.bus.Emit(driver.LifecycleEvent(s.key, state))
+	s.bus.Emit(driver.LifecycleEvent(state))
 }
 
-func (s *session) Run(ctx context.Context, initPrompt *driver.PromptReq) error {
+func (s *session) Run(initPrompt *driver.PromptReq) error {
+	ctx := s.ctx
 	s.opMu.Lock()
 	s.mu.Lock()
 	if s.closed {
@@ -142,17 +141,18 @@ func (s *session) Run(ctx context.Context, initPrompt *driver.PromptReq) error {
 	}
 	s.sessionID.Store(&id)
 	s.proc.registerSession(id, s)
-	s.bus.Emit(driver.SessionAttachedEvent(s.key, id))
+	s.bus.Emit(driver.SessionAttachedEvent(id))
 	s.setState(driver.ProcessState{Phase: driver.PhaseActive, SessionID: id})
 	s.opMu.Unlock()
 
 	if initPrompt != nil {
-		_, err = s.Prompt(ctx, *initPrompt)
+		_, err = s.Prompt(*initPrompt)
 	}
 	return err
 }
 
-func (s *session) Prompt(ctx context.Context, req driver.PromptReq) (driver.RunID, error) {
+func (s *session) Prompt(req driver.PromptReq) (driver.RunID, error) {
+	ctx := s.ctx
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
 	if err := ctx.Err(); err != nil {
@@ -222,15 +222,15 @@ func (s *session) finishPrompt(turn *promptTurn, response rpcResponse) {
 	s.mu.Unlock()
 
 	s.emitToolCalls(runID, calls)
-	s.bus.Emit(driver.OutputEvent(s.key, s.SessionID(), runID, driver.AgentEventItem{Kind: driver.ItemTurnEnd}))
+	s.bus.Emit(driver.OutputEvent(s.SessionID(), runID, driver.AgentEventItem{Kind: driver.ItemTurnEnd}))
 	if response.err != nil && !interrupted {
-		s.bus.Emit(driver.FailedEvent(s.key, s.SessionID(), runID, driver.NewProtocolError("acp session/prompt: "+errorMessage(response.err))))
+		s.bus.Emit(driver.FailedEvent(s.SessionID(), runID, driver.NewProtocolError("acp session/prompt: "+errorMessage(response.err))))
 	} else {
 		finish := driver.FinishNatural
 		if interrupted || promptStopReason(response.result) == "cancelled" {
 			finish = driver.FinishCancelled
 		}
-		s.bus.Emit(driver.CompletedEvent(s.key, s.SessionID(), runID, driver.RunResult{FinishReason: finish}))
+		s.bus.Emit(driver.CompletedEvent(s.SessionID(), runID, driver.RunResult{FinishReason: finish}))
 	}
 	s.setState(driver.ProcessState{Phase: driver.PhaseActive, SessionID: s.SessionID()})
 	close(turn.done)
@@ -244,7 +244,8 @@ func promptStopReason(result json.RawMessage) string {
 	return response.StopReason
 }
 
-func (s *session) Continue(ctx context.Context, input string) (driver.RunID, error) {
+func (s *session) Continue(input string) (driver.RunID, error) {
+	ctx := s.ctx
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
 	if err := ctx.Err(); err != nil {
@@ -283,7 +284,11 @@ func (s *session) Continue(ctx context.Context, input string) (driver.RunID, err
 	return runID, nil
 }
 
-func (s *session) Interrupt(ctx context.Context) error {
+func (s *session) Interrupt() error {
+	return s.interrupt(s.ctx)
+}
+
+func (s *session) interrupt(ctx context.Context) error {
 	s.opMu.Lock()
 	s.mu.Lock()
 	turn := s.active
@@ -324,9 +329,10 @@ func (s *session) Interrupt(ctx context.Context) error {
 	}
 }
 
-func (s *session) Close(ctx context.Context) error {
-	interruptErr := s.Interrupt(ctx)
-	if s.proc.dead.Load() {
+func (s *session) Close() error {
+	ctx := s.ctx
+	interruptErr := s.interrupt(ctx)
+	if errors.Is(interruptErr, context.Canceled) || errors.Is(interruptErr, context.DeadlineExceeded) || s.proc.dead.Load() {
 		interruptErr = nil
 	}
 	s.opMu.Lock()
@@ -342,6 +348,9 @@ func (s *session) Close(ctx context.Context) error {
 	var closeErr error
 	if id != "" && s.proc.caps.Close && !s.proc.dead.Load() {
 		_, closeErr = s.proc.call(ctx, "session/close", map[string]any{"sessionId": id})
+		if errors.Is(closeErr, context.Canceled) || errors.Is(closeErr, context.DeadlineExceeded) {
+			closeErr = nil
+		}
 	}
 	if id != "" {
 		s.proc.unregisterSession(id)
@@ -392,7 +401,7 @@ func (s *session) onPermission(id, params json.RawMessage) {
 	s.permission = &pendingPermission{id: append(json.RawMessage(nil), id...), reason: reason, options: valid}
 	runID := turn.runID
 	s.mu.Unlock()
-	s.bus.Emit(driver.BlockedEvent(s.key, s.SessionID(), runID, reason))
+	s.bus.Emit(driver.BlockedEvent(s.SessionID(), runID, reason))
 	s.setState(driver.ProcessState{Phase: driver.PhaseBlocked, SessionID: s.SessionID(), RunID: runID})
 }
 
@@ -414,11 +423,11 @@ func (s *session) onUpdate(raw json.RawMessage) {
 	switch kind {
 	case "agent_message_chunk", "agentMessageChunk":
 		if text := updateText(update); text != "" {
-			s.bus.Emit(driver.OutputEvent(s.key, s.SessionID(), runID, driver.AgentEventItem{Kind: driver.ItemText, Text: text}))
+			s.bus.Emit(driver.OutputEvent(s.SessionID(), runID, driver.AgentEventItem{Kind: driver.ItemText, Text: text}))
 		}
 	case "agent_thought_chunk", "agentThoughtChunk":
 		if text := updateText(update); text != "" {
-			s.bus.Emit(driver.OutputEvent(s.key, s.SessionID(), runID, driver.AgentEventItem{Kind: driver.ItemThinking, Text: text}))
+			s.bus.Emit(driver.OutputEvent(s.SessionID(), runID, driver.AgentEventItem{Kind: driver.ItemThinking, Text: text}))
 		}
 	case "tool_call", "toolCall":
 		var input any
@@ -457,13 +466,13 @@ func (s *session) onToolCallUpdate(runID driver.RunID, update map[string]json.Ra
 	s.mu.Unlock()
 	s.emitToolCalls(runID, calls)
 	if text := toolResultText(update["content"]); text != "" {
-		s.bus.Emit(driver.OutputEvent(s.key, s.SessionID(), runID, driver.AgentEventItem{Kind: driver.ItemToolResult, Text: text}))
+		s.bus.Emit(driver.OutputEvent(s.SessionID(), runID, driver.AgentEventItem{Kind: driver.ItemToolResult, Text: text}))
 	}
 }
 
 func (s *session) emitToolCalls(runID driver.RunID, calls []pendingToolCall) {
 	for _, call := range calls {
-		s.bus.Emit(driver.OutputEvent(s.key, s.SessionID(), runID, driver.AgentEventItem{
+		s.bus.Emit(driver.OutputEvent(s.SessionID(), runID, driver.AgentEventItem{
 			Kind: driver.ItemToolCall, Tool: call.name, ToolInput: call.input,
 		}))
 	}
@@ -496,7 +505,7 @@ func (s *session) onTransportClosed() {
 	s.mu.Unlock()
 	if turn != nil {
 		runID := turn.runID
-		s.bus.Emit(driver.FailedEvent(s.key, s.SessionID(), runID, driver.NewTransportError(s.proc.closedMessage("ACP runtime closed"))))
+		s.bus.Emit(driver.FailedEvent(s.SessionID(), runID, driver.NewTransportError(s.proc.closedMessage("ACP runtime closed"))))
 		close(turn.done)
 	}
 	s.setState(driver.ProcessState{Phase: driver.PhaseClosed, SessionID: s.SessionID()})

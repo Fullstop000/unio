@@ -3,7 +3,6 @@ package unio
 import (
 	"context"
 	"errors"
-	"time"
 
 	"github.com/Fullstop000/unio/driver"
 )
@@ -38,6 +37,10 @@ func (s *Stream) Next() bool {
 		select {
 		case ev, ok := <-s.events:
 			if !ok {
+				if err := s.ctx.Err(); err != nil {
+					s.finish(Result{}, err, Idle)
+					return false
+				}
 				s.finish(Result{}, driver.NewTransportError("unio: event stream closed before completion"), Idle)
 				return false
 			}
@@ -92,11 +95,9 @@ func (s *Stream) Next() bool {
 		case <-s.ctxDone:
 			s.cancelErr = s.ctx.Err()
 			s.ctxDone = nil
-			interruptCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			err := s.owner.Interrupt(interruptCtx)
-			cancel()
+			err := s.owner.Interrupt()
 			if err != nil {
-				s.finish(s.result, errors.Join(s.cancelErr, err), s.owner.State())
+				s.finish(s.result, errors.Join(s.cancelErr, err), Idle)
 				return false
 			}
 		}

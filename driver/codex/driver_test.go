@@ -236,23 +236,22 @@ func drainUntil(t *testing.T, ch <-chan driver.AgentEvent, pred func(driver.Agen
 
 func TestCodexDriverFullTurn(t *testing.T) {
 	srv := newScriptedServer()
-	d := newWithTransport(func(ctx context.Context, execPath string, spec driver.AgentSpec) (stdioTransport, error) {
+	d := newWithTransport(context.Background(), driver.AgentSpec{ExecutablePath: fakeCodex(t), Model: "gpt-5.5"}, func(ctx context.Context, execPath string, spec driver.AgentSpec) (stdioTransport, error) {
 		return srv, nil
 	})
-	key := driver.SessionKey("w-s")
-	att, err := d.OpenSession(context.Background(), key, driver.AgentSpec{ExecutablePath: fakeCodex(t), Model: "gpt-5.5"}, driver.OpenParams{})
+	att, err := d.OpenSession(driver.OpenParams{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	ch := att.Events.Subscribe()
 
-	if err := att.Session.Run(context.Background(), nil); err != nil {
+	if err := att.Session.Run(nil); err != nil {
 		t.Fatal(err)
 	}
 	if att.Session.SessionID() != "thr-test-1" {
 		t.Fatalf("expected thread id attached, got %q", att.Session.SessionID())
 	}
-	runID, err := att.Session.Prompt(context.Background(), driver.PromptReq{Text: "say pong"})
+	runID, err := att.Session.Prompt(driver.PromptReq{Text: "say pong"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -283,7 +282,7 @@ func TestCodexDriverFullTurn(t *testing.T) {
 	}
 
 	// Verify the outgoing wire had no jsonrpc header on turn/start.
-	if err := att.Session.Close(context.Background()); err != nil {
+	if err := att.Session.Close(); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -296,19 +295,18 @@ func TestCodexDriverFullTurn(t *testing.T) {
 func TestCodexRoutesSoleInFlightTurnWithoutThreadID(t *testing.T) {
 	srv := newScriptedServer()
 	srv.omitThreadID = true
-	d := newWithTransport(func(ctx context.Context, execPath string, spec driver.AgentSpec) (stdioTransport, error) {
+	d := newWithTransport(context.Background(), driver.AgentSpec{ExecutablePath: fakeCodex(t)}, func(ctx context.Context, execPath string, spec driver.AgentSpec) (stdioTransport, error) {
 		return srv, nil
 	})
-	key := driver.SessionKey("w-s")
-	att, err := d.OpenSession(context.Background(), key, driver.AgentSpec{ExecutablePath: fakeCodex(t)}, driver.OpenParams{})
+	att, err := d.OpenSession(driver.OpenParams{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	ch := att.Events.Subscribe()
-	if err := att.Session.Run(context.Background(), nil); err != nil {
+	if err := att.Session.Run(nil); err != nil {
 		t.Fatal(err)
 	}
-	runID, err := att.Session.Prompt(context.Background(), driver.PromptReq{Text: "say pong"})
+	runID, err := att.Session.Prompt(driver.PromptReq{Text: "say pong"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -328,28 +326,27 @@ func TestCodexRoutesSoleInFlightTurnWithoutThreadID(t *testing.T) {
 	if !text || !completed {
 		t.Fatalf("expected fallback-routed text/completed events, text=%v completed=%v", text, completed)
 	}
-	_ = att.Session.Close(context.Background())
+	_ = att.Session.Close()
 }
 
 func TestCodexDriverInterrupt(t *testing.T) {
 	srv := newScriptedServer()
-	d := newWithTransport(func(ctx context.Context, execPath string, spec driver.AgentSpec) (stdioTransport, error) {
+	d := newWithTransport(context.Background(), driver.AgentSpec{ExecutablePath: fakeCodex(t)}, func(ctx context.Context, execPath string, spec driver.AgentSpec) (stdioTransport, error) {
 		return srv, nil
 	})
-	key := driver.SessionKey("w-s")
-	att, _ := d.OpenSession(context.Background(), key, driver.AgentSpec{ExecutablePath: fakeCodex(t)}, driver.OpenParams{})
+	att, _ := d.OpenSession(driver.OpenParams{})
 	ch := att.Events.Subscribe()
-	_ = att.Session.Run(context.Background(), nil)
+	_ = att.Session.Run(nil)
 
-	if err := att.Session.Interrupt(context.Background()); err != nil {
+	if err := att.Session.Interrupt(); err != nil {
 		t.Fatalf("idle interrupt: %v", err)
 	}
 
 	// Start a turn, then interrupt it. Codex supports graceful mid-turn cancel.
-	runID, _ := att.Session.Prompt(context.Background(), driver.PromptReq{Text: "long task"})
+	runID, _ := att.Session.Prompt(driver.PromptReq{Text: "long task"})
 	// Cancel may race the fast scripted completion; both outcomes are valid so
 	// we assert the run terminates (interrupted → FinishCancelled, or completed).
-	_ = att.Session.Interrupt(context.Background())
+	_ = att.Session.Interrupt()
 
 	evs := drainUntil(t, ch, func(ev driver.AgentEvent) bool {
 		return (ev.Type == driver.EventCompleted || ev.Type == driver.EventFailed) && ev.RunID == runID
@@ -363,16 +360,15 @@ func TestCodexDriverInterrupt(t *testing.T) {
 	if !done {
 		t.Fatal("expected the run to complete (naturally or interrupted)")
 	}
-	_ = att.Session.Close(context.Background())
+	_ = att.Session.Close()
 }
 
 func TestCodexConcurrentUseIsSafe(t *testing.T) {
 	srv := newScriptedServer()
-	d := newWithTransport(func(ctx context.Context, execPath string, spec driver.AgentSpec) (stdioTransport, error) {
+	d := newWithTransport(context.Background(), driver.AgentSpec{ExecutablePath: fakeCodex(t)}, func(ctx context.Context, execPath string, spec driver.AgentSpec) (stdioTransport, error) {
 		return srv, nil
 	})
-	key := driver.SessionKey("w-s")
-	att, err := d.OpenSession(context.Background(), key, driver.AgentSpec{ExecutablePath: fakeCodex(t)}, driver.OpenParams{})
+	att, err := d.OpenSession(driver.OpenParams{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -381,7 +377,7 @@ func TestCodexConcurrentUseIsSafe(t *testing.T) {
 		for range ch {
 		}
 	}()
-	if err := att.Session.Run(context.Background(), nil); err != nil {
+	if err := att.Session.Run(nil); err != nil {
 		t.Fatal(err)
 	}
 	var wg sync.WaitGroup
@@ -390,21 +386,21 @@ func TestCodexConcurrentUseIsSafe(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for j := 0; j < 15; j++ {
-				_, _ = att.Session.Prompt(context.Background(), driver.PromptReq{Text: "x"})
-				_ = att.Session.Interrupt(context.Background())
+				_, _ = att.Session.Prompt(driver.PromptReq{Text: "x"})
+				_ = att.Session.Interrupt()
 				_ = att.Session.ProcessState()
 				_ = att.Session.SessionID()
 			}
 		}()
 	}
 	wg.Wait()
-	_ = att.Session.Close(context.Background())
+	_ = att.Session.Close()
 }
 
 func TestCodexOpenSessionNotInstalled(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
-	d := New()
-	_, err := d.OpenSession(context.Background(), driver.SessionKey(""), driver.AgentSpec{ExecutablePath: "codex"}, driver.OpenParams{})
+	d := New(context.Background(), driver.AgentSpec{})
+	_, err := d.OpenSession(driver.OpenParams{})
 	if err == nil {
 		t.Fatal("expected not_installed")
 	}
@@ -413,14 +409,13 @@ func TestCodexOpenSessionNotInstalled(t *testing.T) {
 	}
 }
 
-func TestDriverSharesProcessAcrossSessionKeys(t *testing.T) {
-	d := New()
-	spec := driver.AgentSpec{ExecutablePath: fakeCodex(t)}
-	first, err := d.OpenSession(context.Background(), "key-1", spec, driver.OpenParams{})
+func TestDriverSharesProcessAcrossSessions(t *testing.T) {
+	d := New(context.Background(), driver.AgentSpec{ExecutablePath: fakeCodex(t)})
+	first, err := d.OpenSession(driver.OpenParams{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := d.OpenSession(context.Background(), "key-2", spec, driver.OpenParams{})
+	second, err := d.OpenSession(driver.OpenParams{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -434,18 +429,18 @@ func TestCodexApprovalBlocksAndContinues(t *testing.T) {
 	srv.mu.Lock()
 	srv.requestApproval = true
 	srv.mu.Unlock()
-	d := newWithTransport(func(context.Context, string, driver.AgentSpec) (stdioTransport, error) {
+	d := newWithTransport(context.Background(), driver.AgentSpec{ExecutablePath: fakeCodex(t)}, func(context.Context, string, driver.AgentSpec) (stdioTransport, error) {
 		return srv, nil
 	})
-	att, err := d.OpenSession(context.Background(), "approval", driver.AgentSpec{ExecutablePath: fakeCodex(t)}, driver.OpenParams{})
+	att, err := d.OpenSession(driver.OpenParams{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	events := att.Events.Subscribe()
-	if err := att.Session.Run(context.Background(), nil); err != nil {
+	if err := att.Session.Run(nil); err != nil {
 		t.Fatal(err)
 	}
-	run, err := att.Session.Prompt(context.Background(), driver.PromptReq{Text: "run command"})
+	run, err := att.Session.Prompt(driver.PromptReq{Text: "run command"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -455,12 +450,7 @@ func TestCodexApprovalBlocksAndContinues(t *testing.T) {
 	if blocked[len(blocked)-1].Blocked == nil || blocked[len(blocked)-1].Blocked.Kind != driver.BlockedToolApproval {
 		t.Fatalf("unexpected blocked event: %+v", blocked[len(blocked)-1])
 	}
-	cancelled, cancel := context.WithCancel(context.Background())
-	cancel()
-	if _, err := att.Session.Continue(cancelled, "allow_once"); !errors.Is(err, context.Canceled) {
-		t.Fatalf("cancelled Continue error = %v", err)
-	}
-	continuedRun, err := att.Session.Continue(context.Background(), "allow_once")
+	continuedRun, err := att.Session.Continue("allow_once")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -478,23 +468,23 @@ func TestCodexApprovalBlocksAndContinues(t *testing.T) {
 func TestCodexProcessLifetimeDoesNotUseTurnContext(t *testing.T) {
 	srv := newScriptedServer()
 	var factoryCtx context.Context
-	d := newWithTransport(func(ctx context.Context, _ string, _ driver.AgentSpec) (stdioTransport, error) {
+	ctx, cancel := context.WithCancel(context.Background())
+	d := newWithTransport(ctx, driver.AgentSpec{ExecutablePath: fakeCodex(t)}, func(ctx context.Context, _ string, _ driver.AgentSpec) (stdioTransport, error) {
 		factoryCtx = ctx
 		return srv, nil
 	})
-	att, err := d.OpenSession(context.Background(), "lifetime", driver.AgentSpec{ExecutablePath: fakeCodex(t)}, driver.OpenParams{})
+	att, err := d.OpenSession(driver.OpenParams{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	if err := att.Session.Run(ctx, nil); err != nil {
+	if err := att.Session.Run(nil); err != nil {
 		t.Fatal(err)
 	}
 	cancel()
 	if err := factoryCtx.Err(); err != nil {
 		t.Fatalf("process context was cancelled with turn context: %v", err)
 	}
-	_ = att.Session.Close(context.Background())
+	_ = att.Session.Close()
 }
 
 func TestCodexPromptCancellationWaitsForConfirmedInterrupt(t *testing.T) {
@@ -503,19 +493,19 @@ func TestCodexPromptCancellationWaitsForConfirmedInterrupt(t *testing.T) {
 	srv.turnStartSeen = make(chan struct{})
 	srv.turnStartGate = make(chan struct{})
 	srv.interruptSeen = make(chan struct{})
-	d := newWithTransport(func(context.Context, string, driver.AgentSpec) (stdioTransport, error) { return srv, nil })
-	att, err := d.OpenSession(context.Background(), "cancel-submit", driver.AgentSpec{ExecutablePath: fakeCodex(t)}, driver.OpenParams{})
+	ctx, cancel := context.WithCancel(context.Background())
+	d := newWithTransport(ctx, driver.AgentSpec{ExecutablePath: fakeCodex(t)}, func(context.Context, string, driver.AgentSpec) (stdioTransport, error) { return srv, nil })
+	att, err := d.OpenSession(driver.OpenParams{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer att.Session.Close(context.Background())
-	if err := att.Session.Run(context.Background(), nil); err != nil {
+	defer att.Session.Close()
+	if err := att.Session.Run(nil); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		_, err := att.Session.Prompt(ctx, driver.PromptReq{Text: "long"})
+		_, err := att.Session.Prompt(driver.PromptReq{Text: "long"})
 		done <- err
 	}()
 	<-srv.turnStartSeen
@@ -543,16 +533,16 @@ func TestCodexPromptCancellationWaitsForConfirmedInterrupt(t *testing.T) {
 func TestCodexRejectsTurnStartWithoutTurnID(t *testing.T) {
 	srv := newScriptedServer()
 	srv.omitTurnIDResp = true
-	d := newWithTransport(func(context.Context, string, driver.AgentSpec) (stdioTransport, error) { return srv, nil })
-	att, err := d.OpenSession(context.Background(), "missing-turn", driver.AgentSpec{ExecutablePath: fakeCodex(t)}, driver.OpenParams{})
+	d := newWithTransport(context.Background(), driver.AgentSpec{ExecutablePath: fakeCodex(t)}, func(context.Context, string, driver.AgentSpec) (stdioTransport, error) { return srv, nil })
+	att, err := d.OpenSession(driver.OpenParams{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer att.Session.Close(context.Background())
-	if err := att.Session.Run(context.Background(), nil); err != nil {
+	defer att.Session.Close()
+	if err := att.Session.Run(nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := att.Session.Prompt(context.Background(), driver.PromptReq{Text: "hello"}); err == nil {
+	if _, err := att.Session.Prompt(driver.PromptReq{Text: "hello"}); err == nil {
 		t.Fatal("turn/start without a turn ID was accepted")
 	}
 }
@@ -561,21 +551,19 @@ func TestCodexSurfacesRejectedInterrupt(t *testing.T) {
 	srv := newScriptedServer()
 	srv.holdTurn = true
 	srv.interruptError = true
-	d := newWithTransport(func(context.Context, string, driver.AgentSpec) (stdioTransport, error) { return srv, nil })
-	att, err := d.OpenSession(context.Background(), "interrupt-error", driver.AgentSpec{ExecutablePath: fakeCodex(t)}, driver.OpenParams{})
+	d := newWithTransport(context.Background(), driver.AgentSpec{ExecutablePath: fakeCodex(t)}, func(context.Context, string, driver.AgentSpec) (stdioTransport, error) { return srv, nil })
+	att, err := d.OpenSession(driver.OpenParams{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer att.Session.Close(context.Background())
-	if err := att.Session.Run(context.Background(), nil); err != nil {
+	defer att.Session.Close()
+	if err := att.Session.Run(nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := att.Session.Prompt(context.Background(), driver.PromptReq{Text: "long"}); err != nil {
+	if _, err := att.Session.Prompt(driver.PromptReq{Text: "long"}); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
-	err = att.Session.Interrupt(ctx)
+	err = att.Session.Interrupt()
 	if kind, ok := driverErrorKind(err); !ok || kind != driver.ErrRuntimeReported {
 		t.Fatalf("interrupt error = %v; want runtime_reported", err)
 	}
@@ -588,24 +576,24 @@ func TestCodexForcedCancellationInvalidatesIdleSibling(t *testing.T) {
 	srv.omitTurnStarted = true
 	srv.turnStartSeen = make(chan struct{})
 	srv.turnStartGate = make(chan struct{})
-	d := newWithTransport(func(context.Context, string, driver.AgentSpec) (stdioTransport, error) { return srv, nil })
-	active, err := d.OpenSession(context.Background(), "active", driver.AgentSpec{ExecutablePath: fakeCodex(t)}, driver.OpenParams{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	idle, err := d.OpenSession(context.Background(), "idle", driver.AgentSpec{ExecutablePath: fakeCodex(t)}, driver.OpenParams{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer active.Session.Close(context.Background())
-	defer idle.Session.Close(context.Background())
-	if err := active.Session.Run(context.Background(), nil); err != nil {
-		t.Fatal(err)
-	}
 	ctx, cancel := context.WithCancel(context.Background())
+	d := newWithTransport(ctx, driver.AgentSpec{ExecutablePath: fakeCodex(t)}, func(context.Context, string, driver.AgentSpec) (stdioTransport, error) { return srv, nil })
+	active, err := d.OpenSession(driver.OpenParams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	idle, err := d.OpenSession(driver.OpenParams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer active.Session.Close()
+	defer idle.Session.Close()
+	if err := active.Session.Run(nil); err != nil {
+		t.Fatal(err)
+	}
 	done := make(chan error, 1)
 	go func() {
-		_, err := active.Session.Prompt(ctx, driver.PromptReq{Text: "long"})
+		_, err := active.Session.Prompt(driver.PromptReq{Text: "long"})
 		done <- err
 	}()
 	<-srv.turnStartSeen
@@ -683,7 +671,7 @@ func TestProcessSerializesCompleteJSONLines(t *testing.T) {
 func TestTransportClosedStateIsMonotonic(t *testing.T) {
 	for i := 0; i < 1000; i++ {
 		p := newProcess("codex", driver.AgentSpec{}, nil, "test")
-		s := &session{key: "state", proc: p, bus: driver.NewEventBus()}
+		s := &session{ctx: context.Background(), proc: p, bus: driver.NewEventBus()}
 		s.state.Store(&driver.ProcessState{Phase: driver.PhaseIdle})
 		start := make(chan struct{})
 		var wg sync.WaitGroup
@@ -733,16 +721,16 @@ func TestWaitRespPreservesContextCause(t *testing.T) {
 func TestCodexMissingResumeDoesNotStartFresh(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	srv := newScriptedServer()
-	d := newWithTransport(func(context.Context, string, driver.AgentSpec) (stdioTransport, error) { return srv, nil })
-	att, err := d.OpenSession(context.Background(), "resume", driver.AgentSpec{ExecutablePath: fakeCodex(t)}, driver.OpenParams{ResumeSessionID: "missing"})
+	d := newWithTransport(context.Background(), driver.AgentSpec{ExecutablePath: fakeCodex(t)}, func(context.Context, string, driver.AgentSpec) (stdioTransport, error) { return srv, nil })
+	att, err := d.OpenSession(driver.OpenParams{ResumeSessionID: "missing"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = att.Session.Run(context.Background(), nil)
+	err = att.Session.Run(nil)
 	if kind, ok := driverErrorKind(err); !ok || kind != driver.ErrSessionNotFound {
 		t.Fatalf("resume error = %v", err)
 	}
-	if err := att.Session.Close(context.Background()); err != nil {
+	if err := att.Session.Close(); err != nil {
 		t.Fatal(err)
 	}
 	select {

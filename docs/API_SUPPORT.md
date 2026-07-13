@@ -21,6 +21,7 @@
 | Feature | Claude Code | Codex | Kimi | TraeX | OpenCode | Notes |
 | --- | :---: | :---: | :---: | :---: | :---: | --- |
 | `agent.initialize` | ✅ | ✅ | ✅ | ✅ | ✅ | Checks CLI availability only; authentication errors may surface on the first turn |
+| `agent.lifecycle.cancellation` | ✅ | ✅ | ✅ | ✅ | ✅ | Cancels the Agent and every Session derived from it |
 | `agent.configure.working_directory` | ✅ | ✅ | ✅ | ✅ | ✅ |  |
 | `agent.configure.model` | ✅ | ✅ | ✅ | ✅ | ✅ | OpenCode selects the model through ACP session configuration |
 | `agent.configure.system_prompt` | ✅ | ✅ | ✅ | ✅ | ✅ | ACP agents prepend the system prompt to the first user prompt |

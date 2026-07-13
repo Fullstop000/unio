@@ -17,38 +17,48 @@ import (
 // version reported to the app-server in initialize.
 const clientVersion = "0.1.0"
 
-// Driver implements driver.Driver for Codex app-server. One shared child
-// per agent key multiplexes threads; the registry caches it and evicts on death.
+// Driver implements driver.Driver for Codex app-server. One child process
+// multiplexes all sessions owned by the Agent.
 type Driver struct {
+	ctx     context.Context
+	spec    driver.AgentSpec
 	mu      sync.Mutex
 	process *process
 	factory transportFactory
 }
 
 // New constructs a Codex driver using the real app-server transport.
-func New() *Driver {
-	return &Driver{factory: spawnProcTransport}
+func New(ctx context.Context, spec driver.AgentSpec) *Driver {
+	return &Driver{ctx: ctx, spec: spec, factory: spawnProcTransport}
 }
 
-func newWithTransport(f transportFactory) *Driver {
-	return &Driver{factory: f}
+func newWithTransport(ctx context.Context, spec driver.AgentSpec, f transportFactory) *Driver {
+	return &Driver{ctx: ctx, spec: spec, factory: f}
 }
 
 // Probe reports installed/authed state based on binary presence.
-func (d *Driver) Probe(ctx context.Context) (driver.ProbeAuth, error) {
-	if _, err := driver.ResolveExecutable(driver.AgentSpec{ExecutablePath: "codex"}); err != nil {
+func (d *Driver) Probe() (driver.ProbeAuth, error) {
+	spec := d.spec
+	if spec.ExecutablePath == "" {
+		spec.ExecutablePath = "codex"
+	}
+	if _, err := driver.ResolveExecutable(spec); err != nil {
 		return driver.AuthNotInstalled, nil
 	}
 	return driver.AuthAuthed, nil
 }
 
-func (d *Driver) ListSessions(ctx context.Context, params driver.ListSessionsParams) ([]driver.StoredSessionMeta, error) {
-	return listStoredSessions(ctx, params.Cwd)
+func (d *Driver) ListSessions(params driver.ListSessionsParams) ([]driver.StoredSessionMeta, error) {
+	return listStoredSessions(d.ctx, params.Cwd)
 }
 
 // OpenSession resolves the executable early (not_installed) and builds an idle
-// session bound to the shared process for this agent key.
-func (d *Driver) OpenSession(ctx context.Context, key driver.SessionKey, spec driver.AgentSpec, params driver.OpenParams) (*driver.SessionAttachment, error) {
+// session bound to the Agent's shared process.
+func (d *Driver) OpenSession(params driver.OpenParams) (*driver.SessionAttachment, error) {
+	spec := d.spec
+	if params.Cwd != "" {
+		spec.Cwd = params.Cwd
+	}
 	if spec.ExecutablePath == "" {
 		spec.ExecutablePath = "codex"
 	}
@@ -63,7 +73,7 @@ func (d *Driver) OpenSession(ctx context.Context, key driver.SessionKey, spec dr
 		d.process = newProcess(execPath, spec, d.factory, clientVersion)
 	}
 	proc := d.process
-	s := &session{key: key, spec: spec, proc: proc, resume: params.ResumeSessionID, bus: bus}
+	s := &session{ctx: d.ctx, spec: spec, proc: proc, resume: params.ResumeSessionID, bus: bus}
 	if !proc.acquire(s) {
 		proc = newProcess(execPath, spec, d.factory, clientVersion)
 		d.process = proc
@@ -77,7 +87,7 @@ func (d *Driver) OpenSession(ctx context.Context, key driver.SessionKey, spec dr
 
 // session is one codex thread. Implements driver.Session.
 type session struct {
-	key    driver.SessionKey
+	ctx    context.Context
 	spec   driver.AgentSpec
 	proc   *process
 	resume driver.SessionID
@@ -112,8 +122,6 @@ type pendingBlock struct {
 	reason    driver.BlockedReason
 }
 
-func (s *session) Key() driver.SessionKey { return s.key }
-
 func (s *session) SessionID() driver.SessionID {
 	if p := s.threadID.Load(); p != nil {
 		return *p
@@ -135,7 +143,7 @@ func (s *session) setState(st driver.ProcessState) {
 		st = driver.ProcessState{Phase: driver.PhaseClosed, SessionID: s.SessionID()}
 	}
 	s.state.Store(&st)
-	s.bus.Emit(driver.LifecycleEvent(s.key, st))
+	s.bus.Emit(driver.LifecycleEvent(st))
 }
 
 func (s *session) transportUnavailable() bool {
@@ -143,7 +151,8 @@ func (s *session) transportUnavailable() bool {
 }
 
 // Run starts the shared child (if needed) then starts or resumes this thread.
-func (s *session) Run(ctx context.Context, initPrompt *driver.PromptReq) error {
+func (s *session) Run(initPrompt *driver.PromptReq) error {
+	ctx := s.ctx
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
@@ -185,12 +194,12 @@ func (s *session) Run(ctx context.Context, initPrompt *driver.PromptReq) error {
 
 	s.threadID.Store(&threadID)
 	s.proc.registerSession(threadID, s)
-	s.bus.Emit(driver.SessionAttachedEvent(s.key, threadID))
+	s.bus.Emit(driver.SessionAttachedEvent(threadID))
 	s.setState(driver.ProcessState{Phase: driver.PhaseActive, SessionID: threadID})
 	s.mu.Unlock()
 
 	if initPrompt != nil {
-		if _, err := s.Prompt(ctx, *initPrompt); err != nil {
+		if _, err := s.Prompt(*initPrompt); err != nil {
 			return err
 		}
 	}
@@ -244,7 +253,8 @@ func (s *session) startOrResumeThread(ctx context.Context) (string, error) {
 
 // Prompt sends turn/start and marks the turn in flight; output arrives via the
 // reader routing into onEvent.
-func (s *session) Prompt(ctx context.Context, req driver.PromptReq) (driver.RunID, error) {
+func (s *session) Prompt(req driver.PromptReq) (driver.RunID, error) {
+	ctx := s.ctx
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
@@ -280,13 +290,13 @@ func (s *session) Prompt(ctx context.Context, req driver.PromptReq) (driver.RunI
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			s.stopSubmittedTurn(ch)
 		}
-		s.bus.Emit(driver.FailedEvent(s.key, threadID, runID, aerr))
+		s.bus.Emit(driver.FailedEvent(threadID, runID, aerr))
 		return runID, aerr
 	}
 	if ev.Type == EvError {
 		aerr := driver.NewRuntimeReportedError(ev.ErrMsg)
 		s.clearSubmittedTurn()
-		s.bus.Emit(driver.FailedEvent(s.key, threadID, runID, aerr))
+		s.bus.Emit(driver.FailedEvent(threadID, runID, aerr))
 		return runID, aerr
 	}
 	if ev.Type != EvTurnResponse || ev.TurnID == "" {
@@ -294,7 +304,7 @@ func (s *session) Prompt(ctx context.Context, req driver.PromptReq) (driver.RunI
 		s.proc.shutdown()
 		<-s.proc.closed
 		s.clearSubmittedTurn()
-		s.bus.Emit(driver.FailedEvent(s.key, threadID, runID, aerr))
+		s.bus.Emit(driver.FailedEvent(threadID, runID, aerr))
 		return runID, aerr
 	}
 	s.turnID.Store(&ev.TurnID)
@@ -304,7 +314,8 @@ func (s *session) Prompt(ctx context.Context, req driver.PromptReq) (driver.RunI
 
 // Interrupt sends turn/interrupt for the in-flight turn. Codex supports graceful
 // mid-turn interrupt (unlike Claude headless).
-func (s *session) Interrupt(ctx context.Context) error {
+func (s *session) Interrupt() error {
+	ctx := s.ctx
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.interruptLocked(ctx)
@@ -388,7 +399,8 @@ func (s *session) clearSubmittedTurn() {
 	s.setState(driver.ProcessState{Phase: driver.PhaseActive, SessionID: s.SessionID()})
 }
 
-func (s *session) Continue(ctx context.Context, input string) (driver.RunID, error) {
+func (s *session) Continue(input string) (driver.RunID, error) {
+	ctx := s.ctx
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
@@ -445,7 +457,7 @@ func (s *session) setBlocked(ev AppServerEvent, kind driver.BlockedKind, message
 	s.blockMu.Lock()
 	s.block = &pendingBlock{requestID: append(json.RawMessage(nil), ev.RequestID...), reason: reason}
 	s.blockMu.Unlock()
-	s.bus.Emit(driver.BlockedEvent(s.key, s.SessionID(), run, reason))
+	s.bus.Emit(driver.BlockedEvent(s.SessionID(), run, reason))
 	s.curRun.Store(ptr(""))
 	s.setState(driver.ProcessState{Phase: driver.PhaseBlocked, SessionID: s.SessionID(), RunID: run})
 }
@@ -463,7 +475,8 @@ func (s *session) finishTurnDone() {
 // Close unregisters the session (tearing down the shared child only when this
 // was the last one) and closes the bus. Idempotent and safe against concurrent
 // Run/Prompt/Cancel.
-func (s *session) Close(ctx context.Context) error {
+func (s *session) Close() error {
+	ctx := context.WithoutCancel(s.ctx)
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()

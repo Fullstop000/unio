@@ -41,18 +41,18 @@ func main() {
 		wg.Add(1)
 		go func(a unio.AgentKind) {
 			defer wg.Done()
-			agent, err := unio.New(a)
+			agent, err := unio.New(ctx, a)
 			if err != nil {
 				results <- outcome{agent: a, err: err}
 				return
 			}
 			defer agent.Close()
-			session, err := agent.NewSession(ctx)
+			session, err := agent.NewSession()
 			if err != nil {
 				results <- outcome{agent: a, err: err}
 				return
 			}
-			res, err := session.Run(ctx, prompt)
+			res, err := session.Run(prompt)
 			results <- outcome{agent: a, res: res, err: err}
 		}(a)
 	}

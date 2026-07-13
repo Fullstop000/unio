@@ -13,7 +13,8 @@ import (
 // Agent is one configured coding-agent runtime. It owns the concrete driver,
 // shared runtime processes, and all session handles created through it.
 type Agent struct {
-	kind   AgentKind
+	ctx    context.Context
+	cancel context.CancelFunc
 	cfg    config
 	driver driver.Driver
 
@@ -23,33 +24,48 @@ type Agent struct {
 	closed   atomic.Bool
 }
 
-// New initializes an agent runtime. A successful return means its CLI is
-// installed and available to create sessions.
-func New(kind AgentKind, opts ...Option) (*Agent, error) {
-	d, err := driverFor(kind)
-	if err != nil {
+// New initializes an agent runtime whose lifetime is bounded by parent. A
+// successful return means its CLI is installed and available to create
+// sessions. Cancelling parent closes the Agent and every derived Session.
+func New(parent context.Context, kind AgentKind, opts ...Option) (*Agent, error) {
+	if err := parent.Err(); err != nil {
 		return nil, err
 	}
-	auth, err := d.Probe(context.Background())
+	ctx, cancel := context.WithCancel(parent)
+	cfg := buildConfig(opts)
+	d, err := driverFor(ctx, kind, cfg.spec())
 	if err != nil {
+		cancel()
+		return nil, err
+	}
+	auth, err := d.Probe()
+	if err != nil {
+		cancel()
 		return nil, err
 	}
 	if auth == driver.AuthNotInstalled {
+		cancel()
 		return nil, errs.NotInstalledCmd(string(kind))
 	}
 	if auth == driver.AuthUnauthed {
+		cancel()
 		return nil, errs.RuntimeReported(string(kind) + " is not authenticated")
 	}
-	return &Agent{
-		kind: kind, cfg: buildConfig(opts), driver: d,
+	agent := &Agent{
+		ctx: ctx, cancel: cancel, cfg: cfg, driver: d,
 		sessions: make(map[string]*Session), pending: make(map[*Session]struct{}),
-	}, nil
+	}
+	go func() {
+		<-ctx.Done()
+		_ = agent.Close()
+	}()
+	return agent, nil
 }
 
 // NewSession creates an idle local conversation handle without sending a
 // hidden prompt. Its runtime ID is assigned by the first Run or Stream.
-func (a *Agent) NewSession(ctx context.Context) (*Session, error) {
-	if err := ctx.Err(); err != nil {
+func (a *Agent) NewSession() (*Session, error) {
+	if err := a.ctx.Err(); err != nil {
 		return nil, err
 	}
 	a.mu.Lock()
@@ -66,17 +82,16 @@ func (a *Agent) NewSession(ctx context.Context) (*Session, error) {
 // SessionsIn selects another directory, AllSessions removes the directory
 // filter, and MaxSessions caps the number of returned conversations. Maintained
 // live handles are included even when runtime history has not reached disk yet.
-func (a *Agent) ListSessions(ctx context.Context, opts ...ListSessionsOption) ([]SessionInfo, error) {
+func (a *Agent) ListSessions(opts ...ListSessionsOption) ([]SessionInfo, error) {
 	if a.closed.Load() {
 		return nil, errs.InvalidState("agent is closed")
 	}
-	spec := a.cfg.spec()
-	listCfg := buildListSessionsConfig(spec.Cwd, opts)
-	params := driver.ListSessionsParams{Cwd: listCfg.cwd, Spec: spec}
+	listCfg := buildListSessionsConfig(a.cfg.spec().Cwd, opts)
+	params := driver.ListSessionsParams{Cwd: listCfg.cwd}
 	if listCfg.all {
 		params.Cwd = ""
 	}
-	stored, err := a.driver.ListSessions(ctx, params)
+	stored, err := a.driver.ListSessions(params)
 	if err != nil {
 		return nil, err
 	}
@@ -104,7 +119,7 @@ func (a *Agent) ListSessions(ctx context.Context, opts ...ListSessionsOption) ([
 
 // GetSession returns the maintained handle for a persisted runtime session.
 // It does not attach to the runtime; the next Run or Stream resumes it.
-func (a *Agent) GetSession(ctx context.Context, id string) (*Session, error) {
+func (a *Agent) GetSession(id string) (*Session, error) {
 	if id == "" {
 		return nil, errs.SessionNotFound(id)
 	}
@@ -118,7 +133,7 @@ func (a *Agent) GetSession(ctx context.Context, id string) (*Session, error) {
 	}
 	a.mu.Unlock()
 
-	stored, err := a.driver.ListSessions(ctx, driver.ListSessionsParams{Spec: a.cfg.spec()})
+	stored, err := a.driver.ListSessions(driver.ListSessionsParams{})
 	if err != nil {
 		return nil, err
 	}
@@ -171,6 +186,7 @@ func (a *Agent) Close() error {
 	if !a.closed.CompareAndSwap(false, true) {
 		return nil
 	}
+	a.cancel()
 	a.mu.Lock()
 	all := make([]*Session, 0, len(a.sessions)+len(a.pending))
 	for _, s := range a.sessions {
@@ -183,7 +199,7 @@ func (a *Agent) Close() error {
 
 	var failures []error
 	for _, s := range all {
-		if err := s.closeAttachment(context.Background()); err != nil {
+		if err := s.closeAttachment(); err != nil {
 			failures = append(failures, err)
 		}
 	}

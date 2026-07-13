@@ -23,35 +23,35 @@ const openCodeDeepSeekV4Flash = "deepseek/deepseek-v4-flash"
 func TestReal_ACP_TraeXCore(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	agent, err := unio.New(unio.TraeX)
+	agent, err := unio.New(ctx, unio.TraeX)
 	if err != nil {
 		t.Skipf("traex unavailable: %v", err)
 	}
 	defer agent.Close()
-	if sessions, err := agent.ListSessions(ctx); err != nil {
+	if sessions, err := agent.ListSessions(); err != nil {
 		t.Fatalf("session/list: %v", err)
 	} else {
 		t.Logf("traex listed %d sessions", len(sessions))
 	}
-	session, err := agent.NewSession(ctx)
+	session, err := agent.NewSession()
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := session.Run(ctx, "Reply with exactly one word: ok")
+	result, err := session.Run("Reply with exactly one word: ok")
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	if strings.TrimSpace(result.Text) == "" || result.SessionID == "" {
 		t.Fatalf("result = %+v", result)
 	}
-	stats, err := session.TokenStatistics(ctx)
+	stats, err := session.TokenStatistics()
 	if err != nil {
 		t.Fatalf("session token statistics: %v", err)
 	}
 	if stats.InputTokens == 0 || stats.OutputTokens == 0 {
 		t.Fatalf("session token statistics = %+v", stats)
 	}
-	raw, err := session.Raw(ctx)
+	raw, err := session.Raw()
 	if err != nil || raw.Format != unio.SessionDataJSONL || len(raw.Data) == 0 {
 		t.Fatalf("raw session data: format=%q bytes=%d error=%v", raw.Format, len(raw.Data), err)
 	}
@@ -60,8 +60,8 @@ func TestReal_ACP_TraeXCore(t *testing.T) {
 func TestReal_ACP_KimiSessionTokenStatistics(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	d := acp.New(acp.Kimi)
-	probe, err := d.Probe(ctx)
+	d := acp.New(ctx, acp.Kimi, driver.AgentSpec{})
+	probe, err := d.Probe()
 	if err != nil || probe == driver.AuthNotInstalled {
 		t.Skipf("kimi unavailable: probe=%+v err=%v", probe, err)
 	}
@@ -85,17 +85,17 @@ func TestReal_ACP_KimiSessionTokenStatistics(t *testing.T) {
 		})
 	}
 	for _, sessionID := range sessionIDs {
-		attachment, openErr := d.OpenSession(ctx, "kimi-statistics", driver.AgentSpec{}, driver.OpenParams{ResumeSessionID: driver.SessionID(sessionID)})
+		attachment, openErr := d.OpenSession(driver.OpenParams{ResumeSessionID: driver.SessionID(sessionID)})
 		if openErr != nil {
 			continue
 		}
-		raw, rawErr := attachment.Session.Raw(ctx)
+		raw, rawErr := attachment.Session.Raw()
 		if rawErr != nil || raw.Format != driver.SessionDataJSONL || len(raw.Data) == 0 {
-			_ = attachment.Session.Close(context.Background())
+			_ = attachment.Session.Close()
 			continue
 		}
-		stats, statsErr := attachment.Session.TokenStatistics(ctx)
-		_ = attachment.Session.Close(context.Background())
+		stats, statsErr := attachment.Session.TokenStatistics()
+		_ = attachment.Session.Close()
 		if statsErr == nil && stats.InputTokens > 0 && stats.OutputTokens > 0 {
 			t.Logf("kimi session usage: input=%d output=%d cache_read=%d cache_write=%d",
 				stats.InputTokens, stats.OutputTokens, stats.CacheReadTokens, stats.CacheWriteTokens)
@@ -112,49 +112,45 @@ func TestReal_ACP_KimiProtocol(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	d := acp.New(acp.Kimi)
-	probe, err := d.Probe(ctx)
+	spec := driver.AgentSpec{Cwd: cwd}
+	d := acp.New(ctx, acp.Kimi, spec)
+	probe, err := d.Probe()
 	if err != nil || probe == driver.AuthNotInstalled {
 		t.Skipf("kimi unavailable: probe=%+v err=%v", probe, err)
 	}
 	defer d.Close()
-	spec := driver.AgentSpec{Cwd: cwd}
-	listed, err := d.ListSessions(ctx, driver.ListSessionsParams{Cwd: cwd, Spec: spec})
+	listed, err := d.ListSessions(driver.ListSessionsParams{Cwd: cwd})
 	if err != nil {
 		t.Fatalf("session/list: %v", err)
 	}
 	t.Logf("kimi listed %d sessions", len(listed))
 	if len(listed) > 0 {
-		resumeSpec := spec
-		if listed[0].Cwd != "" {
-			resumeSpec.Cwd = listed[0].Cwd
-		}
-		resumed, err := d.OpenSession(ctx, "kimi-resume", resumeSpec, driver.OpenParams{ResumeSessionID: listed[0].SessionID})
+		resumed, err := d.OpenSession(driver.OpenParams{ResumeSessionID: listed[0].SessionID, Cwd: listed[0].Cwd})
 		if err != nil {
 			t.Fatal(err)
 		}
 		_ = resumed.Events.Subscribe()
-		if err := resumed.Session.Run(ctx, nil); err != nil {
+		if err := resumed.Session.Run(nil); err != nil {
 			t.Fatalf("session/resume: %v", err)
 		}
 		if resumed.Session.SessionID() != listed[0].SessionID {
 			t.Fatalf("resumed ID = %q, want %q", resumed.Session.SessionID(), listed[0].SessionID)
 		}
-		defer resumed.Session.Close(ctx)
+		defer resumed.Session.Close()
 	}
 
-	att, err := d.OpenSession(ctx, "kimi-protocol", spec, driver.OpenParams{})
+	att, err := d.OpenSession(driver.OpenParams{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	_ = att.Events.Subscribe()
-	if err := att.Session.Run(ctx, nil); err != nil {
+	if err := att.Session.Run(nil); err != nil {
 		t.Fatalf("session/new: %v", err)
 	}
 	if att.Session.SessionID() == "" {
 		t.Fatal("session/new returned no ID")
 	}
-	if err := att.Session.Close(ctx); err != nil {
+	if err := att.Session.Close(); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -166,30 +162,30 @@ func TestReal_ACP_OpenCodeProtocol(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	d := acp.New(acp.OpenCode)
-	probe, err := d.Probe(ctx)
+	spec := driver.AgentSpec{Cwd: cwd, Model: openCodeDeepSeekV4Flash, ExtraArgs: []string{"--pure"}}
+	d := acp.New(ctx, acp.OpenCode, spec)
+	probe, err := d.Probe()
 	if err != nil || probe == driver.AuthNotInstalled {
 		t.Skipf("opencode unavailable: probe=%+v err=%v", probe, err)
 	}
 	defer d.Close()
-	spec := driver.AgentSpec{Cwd: cwd, Model: openCodeDeepSeekV4Flash, ExtraArgs: []string{"--pure"}}
-	listed, err := d.ListSessions(ctx, driver.ListSessionsParams{Cwd: cwd, Spec: spec})
+	listed, err := d.ListSessions(driver.ListSessionsParams{Cwd: cwd})
 	if err != nil {
 		t.Fatalf("session/list: %v", err)
 	}
 	t.Logf("opencode listed %d sessions", len(listed))
-	att, err := d.OpenSession(ctx, "opencode-protocol", spec, driver.OpenParams{})
+	att, err := d.OpenSession(driver.OpenParams{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	_ = att.Events.Subscribe()
-	if err := att.Session.Run(ctx, nil); err != nil {
+	if err := att.Session.Run(nil); err != nil {
 		t.Fatalf("session/new: %v", err)
 	}
 	if att.Session.SessionID() == "" {
 		t.Fatal("session/new returned no ID")
 	}
-	if err := att.Session.Close(ctx); err != nil {
+	if err := att.Session.Close(); err != nil {
 		t.Fatal(err)
 	}
 	if len(listed) > 0 {
@@ -197,20 +193,20 @@ func TestReal_ACP_OpenCodeProtocol(t *testing.T) {
 		if listed[0].Cwd != "" {
 			resumeSpec.Cwd = listed[0].Cwd
 		}
-		resumeDriver := acp.New(acp.OpenCode)
+		resumeDriver := acp.New(ctx, acp.OpenCode, resumeSpec)
 		defer resumeDriver.Close()
-		resumed, err := resumeDriver.OpenSession(ctx, "opencode-resume", resumeSpec, driver.OpenParams{ResumeSessionID: listed[0].SessionID})
+		resumed, err := resumeDriver.OpenSession(driver.OpenParams{ResumeSessionID: listed[0].SessionID, Cwd: resumeSpec.Cwd})
 		if err != nil {
 			t.Fatal(err)
 		}
 		_ = resumed.Events.Subscribe()
-		if err := resumed.Session.Run(ctx, nil); err != nil {
+		if err := resumed.Session.Run(nil); err != nil {
 			t.Fatalf("session/resume: %v", err)
 		}
 		if resumed.Session.SessionID() != listed[0].SessionID {
 			t.Fatalf("resumed ID = %q, want %q", resumed.Session.SessionID(), listed[0].SessionID)
 		}
-		if err := resumed.Session.Close(ctx); err != nil {
+		if err := resumed.Session.Close(); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -220,6 +216,7 @@ func TestReal_ACP_OpenCodeDeepSeekV4Flash(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	agent, err := unio.New(
+		ctx,
 		unio.OpenCode,
 		unio.WithModel(openCodeDeepSeekV4Flash),
 		unio.WithExtraArgs("--pure"),
@@ -228,11 +225,11 @@ func TestReal_ACP_OpenCodeDeepSeekV4Flash(t *testing.T) {
 		t.Skipf("opencode unavailable: %v", err)
 	}
 	defer agent.Close()
-	session, err := agent.NewSession(ctx)
+	session, err := agent.NewSession()
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := session.Run(ctx, "Reply with exactly one word: ok")
+	result, err := session.Run("Reply with exactly one word: ok")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -246,15 +243,15 @@ func TestReal_ACP_TraeXResume(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
-	agent, err := unio.New(unio.TraeX)
+	agent, err := unio.New(ctx, unio.TraeX)
 	if err != nil {
 		t.Skipf("traex unavailable: %v", err)
 	}
-	session, err := agent.NewSession(ctx)
+	session, err := agent.NewSession()
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, err := session.Run(ctx, "Reply with exactly one word: first")
+	first, err := session.Run("Reply with exactly one word: first")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,16 +263,16 @@ func TestReal_ACP_TraeXResume(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	resumingAgent, err := unio.New(unio.TraeX)
+	resumingAgent, err := unio.New(ctx, unio.TraeX)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer resumingAgent.Close()
-	resumed, err := resumingAgent.GetSession(ctx, id)
+	resumed, err := resumingAgent.GetSession(id)
 	if err != nil {
 		t.Fatalf("GetSession(%q): %v", id, err)
 	}
-	result, err := resumed.Run(ctx, "Reply with exactly one word: resumed")
+	result, err := resumed.Run("Reply with exactly one word: resumed")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -287,21 +284,21 @@ func TestReal_ACP_TraeXResume(t *testing.T) {
 func TestReal_ACP_TraeXInterrupt(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
-	agent, err := unio.New(unio.TraeX)
+	agent, err := unio.New(ctx, unio.TraeX)
 	if err != nil {
 		t.Skipf("traex unavailable: %v", err)
 	}
 	defer agent.Close()
-	session, err := agent.NewSession(ctx)
+	session, err := agent.NewSession()
 	if err != nil {
 		t.Fatal(err)
 	}
-	stream, err := session.Stream(ctx, "Write every integer from 1 to 10000, one per line.")
+	stream, err := session.Stream("Write every integer from 1 to 10000, one per line.")
 	if err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(500 * time.Millisecond)
-	if err := session.Interrupt(ctx); err != nil {
+	if err := session.Interrupt(); err != nil {
 		t.Fatal(err)
 	}
 	result, err := stream.Result()
@@ -311,7 +308,7 @@ func TestReal_ACP_TraeXInterrupt(t *testing.T) {
 	if !result.Interrupted {
 		t.Fatalf("interrupt result = %+v", result)
 	}
-	followup, err := session.Run(ctx, "Reply with exactly one word: alive")
+	followup, err := session.Run("Reply with exactly one word: alive")
 	if err != nil {
 		t.Fatal(err)
 	}
