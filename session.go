@@ -8,6 +8,13 @@ import (
 )
 
 // Session is one conversation with an Agent.
+//
+// Two locks with opposite holding disciplines. opMu serializes a whole turn
+// operation (Stream/Continue/Interrupt/*Attachment) and is held across the
+// blocking driver I/O within it. mu guards the mutable fields below and is
+// only ever held for a field snapshot or write, never across I/O, so ID and
+// State stay responsive while a turn is in flight. Lock order is always
+// opMu -> mu; functions that take only mu must not take opMu.
 type Session struct {
 	agent *Agent
 	opMu  sync.Mutex
@@ -122,7 +129,7 @@ func (s *Session) Stream(prompt string) (*Stream, error) {
 		s.mu.Unlock()
 		return nil, errs.InvalidState("cannot run session while " + string(state))
 	}
-	s.state = Running
+	s.transitionLocked(Running)
 	s.mu.Unlock()
 
 	if err := s.ensureAttached(); err != nil {
@@ -135,16 +142,7 @@ func (s *Session) Stream(prompt string) (*Stream, error) {
 	s.mu.Unlock()
 	runID, err := inner.Prompt(driver.PromptReq{Text: prompt})
 	if err != nil {
-		if inner.ProcessState().Phase == driver.PhaseClosed {
-			s.mu.Lock()
-			if s.inner == inner {
-				s.inner = nil
-				s.events = nil
-				s.started = false
-			}
-			s.mu.Unlock()
-			_ = inner.Close()
-		}
+		s.discardIfClosed(inner)
 		s.setState(Idle)
 		return nil, err
 	}
@@ -167,13 +165,7 @@ func (s *Session) ensureAttached() error {
 		return nil
 	}
 	if err := inner.Run(nil); err != nil {
-		s.mu.Lock()
-		if s.inner == inner {
-			s.inner = nil
-			s.events = nil
-			s.started = false
-		}
-		s.mu.Unlock()
+		s.detachIfCurrent(inner)
 		_ = inner.Close()
 		return err
 	}
@@ -202,10 +194,7 @@ func (s *Session) ensureHandle() error {
 			s.mu.Unlock()
 			return nil
 		}
-		stale := s.inner
-		s.inner = nil
-		s.events = nil
-		s.started = false
+		stale := s.detachLocked()
 		s.mu.Unlock()
 		_ = stale.Close()
 		s.mu.Lock()
@@ -251,13 +240,7 @@ func (s *Session) Interrupt() error {
 		return err
 	}
 	if inner.ProcessState().Phase == driver.PhaseClosed {
-		s.mu.Lock()
-		if s.inner == inner {
-			s.inner = nil
-			s.events = nil
-			s.started = false
-		}
-		s.mu.Unlock()
+		s.detachIfCurrent(inner)
 	}
 	if state == Blocked {
 		s.setState(Idle)
@@ -268,67 +251,100 @@ func (s *Session) Interrupt() error {
 // Continue supplies input requested by a blocked turn and waits for the agent
 // to complete, block again, or be interrupted.
 func (s *Session) Continue(input string) (Result, error) {
+	stream, err := s.continueStream(input)
+	if err != nil {
+		return Result{}, err
+	}
+	return stream.Result()
+}
+
+func (s *Session) continueStream(input string) (*Stream, error) {
 	s.opMu.Lock()
+	defer s.opMu.Unlock()
 	s.mu.Lock()
 	if s.agent.closed.Load() {
 		s.mu.Unlock()
-		s.opMu.Unlock()
-		return Result{}, errs.InvalidState("agent is closed")
+		return nil, errs.InvalidState("agent is closed")
 	}
 	if s.state != Blocked {
 		s.mu.Unlock()
-		s.opMu.Unlock()
-		return Result{}, errs.InvalidState("continue requires a blocked session")
+		return nil, errs.InvalidState("continue requires a blocked session")
 	}
 	inner := s.inner
 	if inner == nil || inner.ProcessState().Phase == driver.PhaseClosed {
-		s.inner = nil
-		s.events = nil
-		s.started = false
-		s.state = Idle
+		s.detachLocked()
+		s.transitionLocked(Idle)
 		s.mu.Unlock()
-		s.opMu.Unlock()
 		if inner != nil {
 			_ = inner.Close()
 		}
-		return Result{}, driver.NewTransportError("agent transport closed while blocked")
+		return nil, driver.NewTransportError("agent transport closed while blocked")
 	}
-	s.state = Running
+	s.transitionLocked(Running)
 	events := s.events
 	s.mu.Unlock()
 	runID, err := inner.Continue(input)
 	if err != nil {
-		if inner.ProcessState().Phase == driver.PhaseClosed {
-			s.mu.Lock()
-			if s.inner == inner {
-				s.inner = nil
-				s.events = nil
-				s.started = false
-			}
-			s.mu.Unlock()
-			_ = inner.Close()
+		if s.discardIfClosed(inner) {
 			s.setState(Idle)
 		} else {
 			s.setState(Blocked)
 		}
-		s.opMu.Unlock()
-		return Result{}, err
+		return nil, err
 	}
 	stream := newStream(s.agent.ctx, s, events, runID)
 	s.mu.Lock()
 	s.active = stream
 	s.mu.Unlock()
-	s.opMu.Unlock()
-	return stream.Result()
+	return stream, nil
 }
 
-func (s *Session) setState(state SessionState) {
-	s.mu.Lock()
+// transitionLocked applies a state change and its side effects. The caller
+// must hold s.mu.
+func (s *Session) transitionLocked(state SessionState) {
 	s.state = state
 	if state != Running {
 		s.active = nil
 	}
+}
+
+func (s *Session) setState(state SessionState) {
+	s.mu.Lock()
+	s.transitionLocked(state)
 	s.mu.Unlock()
+}
+
+// detachLocked clears the current attachment and returns the previous inner
+// session, if any. The caller must hold s.mu.
+func (s *Session) detachLocked() driver.Session {
+	inner := s.inner
+	s.inner = nil
+	s.events = nil
+	s.started = false
+	return inner
+}
+
+// detachIfCurrent clears the attachment only when inner is still the live one,
+// guarding against a concurrent re-attach. The caller must not hold s.mu.
+func (s *Session) detachIfCurrent(inner driver.Session) {
+	s.mu.Lock()
+	if s.inner == inner {
+		s.inner = nil
+		s.events = nil
+		s.started = false
+	}
+	s.mu.Unlock()
+}
+
+// discardIfClosed detaches and closes inner when its process has already
+// terminated. It reports whether the attachment was discarded.
+func (s *Session) discardIfClosed(inner driver.Session) bool {
+	if inner.ProcessState().Phase != driver.PhaseClosed {
+		return false
+	}
+	s.detachIfCurrent(inner)
+	_ = inner.Close()
+	return true
 }
 
 func (s *Session) setID(id string) error {
@@ -350,10 +366,7 @@ func (s *Session) closeAttachment() error {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
 	s.mu.Lock()
-	inner := s.inner
-	s.inner = nil
-	s.events = nil
-	s.started = false
+	inner := s.detachLocked()
 	s.mu.Unlock()
 	if inner != nil {
 		return inner.Close()
@@ -365,10 +378,7 @@ func (s *Session) dropAttachment() {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
 	s.mu.Lock()
-	inner := s.inner
-	s.inner = nil
-	s.events = nil
-	s.started = false
+	inner := s.detachLocked()
 	s.mu.Unlock()
 	if inner != nil {
 		_ = inner.Close()

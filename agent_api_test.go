@@ -389,6 +389,90 @@ func TestBlockedContinueReturnsToIdle(t *testing.T) {
 	}
 }
 
+// A failed Continue whose transport is still alive must leave the session
+// Blocked so the caller can retry, not silently drop to Idle.
+func TestBlockedContinueErrorStaysBlocked(t *testing.T) {
+	fd := fake.New(context.Background(), driver.AgentSpec{})
+	agent := newAgentWithDriver(t, fd)
+	session, _ := agent.NewSession()
+	fd.ScriptNextSession(
+		fake.Script{Blocked: &driver.BlockedReason{
+			Kind:    driver.BlockedToolApproval,
+			Options: []driver.BlockOption{{Value: "allow_once", Label: "Allow once"}},
+		}},
+		fake.Script{Items: []driver.AgentEventItem{{Kind: driver.ItemText, Text: "continued"}}},
+	)
+	if blocked, err := session.Run("needs approval"); err != nil || blocked.Blocked == nil {
+		t.Fatalf("blocked result=%+v err=%v", blocked, err)
+	}
+	// An invalid option makes the driver reject Continue without tearing down
+	// the still-blocked transport.
+	if _, err := session.Continue("not_an_option"); err == nil {
+		t.Fatal("Continue accepted an invalid option")
+	}
+	if session.State() != Blocked {
+		t.Fatalf("state after failed Continue = %q; want blocked", session.State())
+	}
+	// The turn is still resumable with a valid option.
+	continued, err := session.Continue("allow_once")
+	if err != nil || continued.Text != "continued" || session.State() != Idle {
+		t.Fatalf("retry result=%+v state=%q err=%v", continued, session.State(), err)
+	}
+}
+
+// A turn may block, be continued, and block again before finally completing.
+func TestBlockedContinueBlocksAgain(t *testing.T) {
+	fd := fake.New(context.Background(), driver.AgentSpec{})
+	agent := newAgentWithDriver(t, fd)
+	session, _ := agent.NewSession()
+	block := fake.Script{Blocked: &driver.BlockedReason{
+		Kind:    driver.BlockedToolApproval,
+		Options: []driver.BlockOption{{Value: "allow_once", Label: "Allow once"}},
+	}}
+	fd.ScriptNextSession(
+		block,
+		block,
+		fake.Script{Items: []driver.AgentEventItem{{Kind: driver.ItemText, Text: "done"}}},
+	)
+	if first, err := session.Run("step one"); err != nil || first.Blocked == nil || session.State() != Blocked {
+		t.Fatalf("first block result=%+v state=%q err=%v", first, session.State(), err)
+	}
+	second, err := session.Continue("allow_once")
+	if err != nil || second.Blocked == nil || session.State() != Blocked {
+		t.Fatalf("second block result=%+v state=%q err=%v", second, session.State(), err)
+	}
+	final, err := session.Continue("allow_once")
+	if err != nil || final.Text != "done" || session.State() != Idle {
+		t.Fatalf("final result=%+v state=%q err=%v", final, session.State(), err)
+	}
+}
+
+// Continue rejects an idle session and an agent that has been closed.
+func TestContinueGuards(t *testing.T) {
+	t.Run("idle session", func(t *testing.T) {
+		agent := newFakeAgent(t)
+		session, _ := agent.NewSession()
+		if _, err := session.Continue("anything"); !errors.Is(err, ErrInvalidState) {
+			t.Fatalf("Continue on idle session error = %v; want invalid state", err)
+		}
+	})
+	t.Run("closed agent", func(t *testing.T) {
+		fd := fake.New(context.Background(), driver.AgentSpec{})
+		agent := newAgentWithDriver(t, fd)
+		session, _ := agent.NewSession()
+		fd.ScriptNextSession(fake.Script{Blocked: &driver.BlockedReason{Kind: driver.BlockedToolApproval}})
+		if blocked, err := session.Run("block"); err != nil || blocked.Blocked == nil {
+			t.Fatalf("blocked result=%+v err=%v", blocked, err)
+		}
+		if err := agent.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := session.Continue("allow_once"); !errors.Is(err, ErrInvalidState) {
+			t.Fatalf("Continue after agent close error = %v; want invalid state", err)
+		}
+	})
+}
+
 func TestInterruptReturnsPartialResult(t *testing.T) {
 	fd := fake.New(context.Background(), driver.AgentSpec{})
 	agent := newAgentWithDriver(t, fd)
@@ -462,17 +546,6 @@ func TestAgentContextCancellationStopsDerivedSession(t *testing.T) {
 		t.Fatalf("state after confirmation = %q", session.State())
 	}
 	close(turnGate)
-}
-
-func waitState(t *testing.T, session *Session, want SessionState) {
-	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if session.State() == want {
-			return
-		}
-	}
-	t.Fatalf("state = %q; want %q", session.State(), want)
 }
 
 func waitDriverPhase(t *testing.T, session *Session, want driver.Phase) {
