@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 
@@ -8,12 +9,15 @@ import (
 )
 
 func main() {
+	output := flag.String("output", "docs/API_SUPPORT.md", "path to the generated support matrix")
+	flag.Parse()
+
 	markdown, err := supportmatrix.Markdown()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	if err := os.WriteFile("docs/API_SUPPORT.md", markdown, 0o644); err != nil {
+	if err := os.WriteFile(*output, markdown, 0o644); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
