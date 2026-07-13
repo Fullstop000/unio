@@ -14,7 +14,7 @@ import (
 func fakeHarness(t *testing.T) Harness {
 	return Harness{
 		Name: "fake",
-		NewDriver: func(t *testing.T) driver.ProtocolDriver {
+		NewDriver: func(t *testing.T) driver.Driver {
 			fd := fake.New()
 			// Both the initial session and the resumed session live under the
 			// same key; script two turns of output.

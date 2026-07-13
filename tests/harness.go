@@ -1,5 +1,5 @@
 // Package e2e holds unio's end-to-end tests: full-lifecycle scenarios that drive
-// a real ProtocolDriver through open → run → prompt → consume the event stream →
+// a real Driver through open → run → prompt → consume the event stream →
 // cancel → resume (in a fresh session) → close, asserting the SDK does something
 // genuinely useful rather than merely compiling.
 //
@@ -25,7 +25,7 @@ type Harness struct {
 	// Name labels the harness in test output.
 	Name string
 	// NewDriver returns the driver-under-test.
-	NewDriver func(t *testing.T) driver.ProtocolDriver
+	NewDriver func(t *testing.T) driver.Driver
 	// Spec is the agent spec used to open sessions.
 	Spec driver.AgentSpec
 	// FirstPrompt / SecondPrompt are the prompts sent across the two turns.

@@ -418,8 +418,8 @@ func TestClaudeProbeNotInstalled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pr.Auth != driver.AuthNotInstalled {
-		t.Fatalf("expected not-installed probe, got %s", pr.Auth)
+	if pr != driver.AuthNotInstalled {
+		t.Fatalf("expected not-installed probe, got %s", pr)
 	}
 }
 

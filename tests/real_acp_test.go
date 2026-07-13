@@ -62,7 +62,7 @@ func TestReal_ACP_KimiSessionTokenStatistics(t *testing.T) {
 	defer cancel()
 	d := acp.New(acp.Kimi)
 	probe, err := d.Probe(ctx)
-	if err != nil || probe.Auth == driver.AuthNotInstalled {
+	if err != nil || probe == driver.AuthNotInstalled {
 		t.Skipf("kimi unavailable: probe=%+v err=%v", probe, err)
 	}
 	defer d.Close()
@@ -85,12 +85,17 @@ func TestReal_ACP_KimiSessionTokenStatistics(t *testing.T) {
 		})
 	}
 	for _, sessionID := range sessionIDs {
-		dataSource := d.NewSessionData(ctx, driver.AgentSpec{}, driver.SessionID(sessionID))
-		raw, rawErr := dataSource.Raw()
-		if rawErr != nil || raw.Format != driver.SessionDataJSONL || len(raw.Data) == 0 {
+		attachment, openErr := d.OpenSession(ctx, "kimi-statistics", driver.AgentSpec{}, driver.OpenParams{ResumeSessionID: driver.SessionID(sessionID)})
+		if openErr != nil {
 			continue
 		}
-		stats, statsErr := dataSource.TokenStatistics()
+		raw, rawErr := attachment.Session.Raw(ctx)
+		if rawErr != nil || raw.Format != driver.SessionDataJSONL || len(raw.Data) == 0 {
+			_ = attachment.Session.Close(context.Background())
+			continue
+		}
+		stats, statsErr := attachment.Session.TokenStatistics(ctx)
+		_ = attachment.Session.Close(context.Background())
 		if statsErr == nil && stats.InputTokens > 0 && stats.OutputTokens > 0 {
 			t.Logf("kimi session usage: input=%d output=%d cache_read=%d cache_write=%d",
 				stats.InputTokens, stats.OutputTokens, stats.CacheReadTokens, stats.CacheWriteTokens)
@@ -109,7 +114,7 @@ func TestReal_ACP_KimiProtocol(t *testing.T) {
 	}
 	d := acp.New(acp.Kimi)
 	probe, err := d.Probe(ctx)
-	if err != nil || probe.Auth == driver.AuthNotInstalled {
+	if err != nil || probe == driver.AuthNotInstalled {
 		t.Skipf("kimi unavailable: probe=%+v err=%v", probe, err)
 	}
 	defer d.Close()
@@ -163,7 +168,7 @@ func TestReal_ACP_OpenCodeProtocol(t *testing.T) {
 	}
 	d := acp.New(acp.OpenCode)
 	probe, err := d.Probe(ctx)
-	if err != nil || probe.Auth == driver.AuthNotInstalled {
+	if err != nil || probe == driver.AuthNotInstalled {
 		t.Skipf("opencode unavailable: probe=%+v err=%v", probe, err)
 	}
 	defer d.Close()

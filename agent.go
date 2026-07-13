@@ -15,7 +15,7 @@ import (
 type Agent struct {
 	kind   AgentKind
 	cfg    config
-	driver driver.ProtocolDriver
+	driver driver.Driver
 
 	mu       sync.Mutex
 	sessions map[string]*Session
@@ -30,14 +30,14 @@ func New(kind AgentKind, opts ...Option) (*Agent, error) {
 	if err != nil {
 		return nil, err
 	}
-	probe, err := d.Probe(context.Background())
+	auth, err := d.Probe(context.Background())
 	if err != nil {
 		return nil, err
 	}
-	if probe.Auth == driver.AuthNotInstalled {
+	if auth == driver.AuthNotInstalled {
 		return nil, errs.NotInstalledCmd(string(kind))
 	}
-	if probe.Auth == driver.AuthUnauthed {
+	if auth == driver.AuthUnauthed {
 		return nil, errs.RuntimeReported(string(kind) + " is not authenticated")
 	}
 	return &Agent{

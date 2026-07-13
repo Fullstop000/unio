@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Fullstop000/unio/driver"
+	acpdrv "github.com/Fullstop000/unio/driver/acp"
 	"github.com/Fullstop000/unio/driver/fake"
 	"github.com/Fullstop000/unio/errs"
 )
@@ -18,33 +19,44 @@ type statisticsDriver struct {
 	usage driver.TokenUsage
 }
 
-func (d *statisticsDriver) NewSessionData(ctx context.Context, _ driver.AgentSpec, _ driver.SessionID) *driver.SessionData {
-	return driver.NewSessionData(
-		ctx,
-		func(context.Context) (driver.RawSessionData, error) {
-			return d.raw, nil
-		},
-		func(_ context.Context, raw driver.RawSessionData) (driver.TokenUsage, error) {
-			if raw.Format != d.raw.Format || string(raw.Data) != string(d.raw.Data) {
-				return driver.TokenUsage{}, driver.NewProtocolError("statistics parser did not receive raw session data")
-			}
-			return d.usage, nil
-		},
-	)
+func (d *statisticsDriver) OpenSession(ctx context.Context, key driver.SessionKey, spec driver.AgentSpec, params driver.OpenParams) (*driver.SessionAttachment, error) {
+	attachment, err := d.Driver.OpenSession(ctx, key, spec, params)
+	if err != nil {
+		return nil, err
+	}
+	attachment.Session = &statisticsSession{Session: attachment.Session, raw: d.raw, usage: d.usage}
+	return attachment, nil
+}
+
+type statisticsSession struct {
+	driver.Session
+	raw   driver.RawSessionData
+	usage driver.TokenUsage
+}
+
+func (s *statisticsSession) Raw(context.Context) (driver.RawSessionData, error) {
+	return s.raw, nil
+}
+
+func (s *statisticsSession) TokenStatistics(ctx context.Context) (driver.TokenUsage, error) {
+	raw, err := s.Raw(ctx)
+	if err != nil {
+		return driver.TokenUsage{}, err
+	}
+	if raw.Format != s.raw.Format || string(raw.Data) != string(s.raw.Data) {
+		return driver.TokenUsage{}, driver.NewProtocolError("statistics parser did not receive raw session data")
+	}
+	return s.usage, nil
 }
 
 func newAgentWithDriver(t *testing.T, fd *fake.Driver) *Agent {
 	return newAgentWithDriverOptions(t, fd)
 }
 
-func newAgentWithDriverOptions(t *testing.T, fd *fake.Driver, opts ...Option) *Agent {
-	return newAgentWithProtocolDriverOptions(t, fd, opts...)
-}
-
-func newAgentWithProtocolDriverOptions(t *testing.T, d driver.ProtocolDriver, opts ...Option) *Agent {
+func newAgentWithDriverOptions(t *testing.T, d driver.Driver, opts ...Option) *Agent {
 	t.Helper()
 	prev := driverOverride
-	driverOverride = func(AgentKind) (driver.ProtocolDriver, bool) { return d, true }
+	driverOverride = func(AgentKind) (driver.Driver, bool) { return d, true }
 	t.Cleanup(func() { driverOverride = prev })
 	agent, err := New(Claude, opts...)
 	if err != nil {
@@ -103,9 +115,9 @@ func TestStreamSubmissionErrorIsDirect(t *testing.T) {
 
 func TestNewReportsUnavailableAgent(t *testing.T) {
 	fd := fake.New()
-	fd.SetProbe(driver.RuntimeProbe{Auth: driver.AuthNotInstalled, Transport: driver.TransportFake}, nil)
+	fd.SetProbe(driver.AuthNotInstalled, nil)
 	prev := driverOverride
-	driverOverride = func(AgentKind) (driver.ProtocolDriver, bool) { return fd, true }
+	driverOverride = func(AgentKind) (driver.Driver, bool) { return fd, true }
 	t.Cleanup(func() { driverOverride = prev })
 	_, err := New(Claude)
 	if kind, ok := errs.KindOf(err); !ok || kind != errs.KindNotInstalled {
@@ -119,8 +131,8 @@ func TestACPAgentKindsUseTheSharedDriver(t *testing.T) {
 		if err != nil {
 			t.Fatalf("driverFor(%q): %v", kind, err)
 		}
-		if d.Transport() != driver.TransportACPNative {
-			t.Fatalf("driverFor(%q) transport = %q", kind, d.Transport())
+		if _, ok := d.(*acpdrv.Driver); !ok {
+			t.Fatalf("driverFor(%q) = %T; want *acp.Driver", kind, d)
 		}
 	}
 }
@@ -128,7 +140,7 @@ func TestACPAgentKindsUseTheSharedDriver(t *testing.T) {
 func TestListAndGetSessionMaintainsIdentity(t *testing.T) {
 	fd := fake.New()
 	fd.SetStoredSessions([]driver.StoredSessionMeta{{SessionID: "stored-1", Title: "auth", Cwd: "/repo"}})
-	agent := newAgentWithProtocolDriverOptions(t, fd, WithCwd("/repo"))
+	agent := newAgentWithDriverOptions(t, fd, WithCwd("/repo"))
 	infos, err := agent.ListSessions(context.Background())
 	if err != nil || len(infos) != 1 || infos[0].ID != "stored-1" {
 		t.Fatalf("infos=%+v err=%v", infos, err)
@@ -212,7 +224,7 @@ func TestListSessionsMaxSessions(t *testing.T) {
 		{SessionID: "two", Cwd: "/repo"},
 		{SessionID: "three", Cwd: "/repo"},
 	})
-	agent := newAgentWithProtocolDriverOptions(t, fd, WithCwd("/repo"))
+	agent := newAgentWithDriverOptions(t, fd, WithCwd("/repo"))
 
 	got, err := agent.ListSessions(context.Background(), MaxSessions(2))
 	if err != nil || len(got) != 2 || got[0].ID != "one" || got[1].ID != "two" {
@@ -245,7 +257,7 @@ func TestSessionTokenStatistics(t *testing.T) {
 		InputTokens: 100, OutputTokens: 20, CacheReadTokens: 60, CacheWriteTokens: 5,
 	}}
 	fd.SetStoredSessions([]driver.StoredSessionMeta{{SessionID: "stored", Cwd: "/repo"}})
-	agent := newAgentWithProtocolDriverOptions(t, fd, WithCwd("/repo"))
+	agent := newAgentWithDriverOptions(t, fd, WithCwd("/repo"))
 	session, err := agent.GetSession(context.Background(), "stored")
 	if err != nil {
 		t.Fatal(err)
@@ -260,6 +272,19 @@ func TestSessionTokenStatistics(t *testing.T) {
 	raw, err := session.Raw(context.Background())
 	if err != nil || raw.Format != SessionDataJSONL || string(raw.Data) != "raw data" {
 		t.Fatalf("raw = %+v, error = %v", raw, err)
+	}
+	session.mu.Lock()
+	inner := session.inner
+	session.mu.Unlock()
+	if inner == nil {
+		t.Fatal("reading persisted data did not create a session handle")
+	}
+	if state := inner.ProcessState(); state.Phase != driver.PhaseIdle {
+		t.Fatalf("reading persisted data started runtime: state=%+v", state)
+	}
+	result, err := session.Run(context.Background(), "continue")
+	if err != nil || result.SessionID != "stored" {
+		t.Fatalf("run after persisted data read: result=%+v error=%v", result, err)
 	}
 }
 
@@ -280,7 +305,7 @@ func TestSessionTokenStatisticsUnsupported(t *testing.T) {
 }
 
 func TestSessionRawDataRequiresRuntimeID(t *testing.T) {
-	agent := newAgentWithProtocolDriverOptions(t, &statisticsDriver{Driver: fake.New()})
+	agent := newAgentWithDriverOptions(t, &statisticsDriver{Driver: fake.New()})
 	session, err := agent.NewSession(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -393,25 +418,25 @@ func waitDriverPhase(t *testing.T, session *Session, want driver.Phase) {
 }
 
 type blockingOpenDriver struct {
-	driver.ProtocolDriver
+	driver.Driver
 	started chan struct{}
 	release chan struct{}
 }
 
 type blockingPromptDriver struct {
-	driver.ProtocolDriver
+	driver.Driver
 	started chan struct{}
 	release chan struct{}
 }
 
 type recordingSpecDriver struct {
-	driver.ProtocolDriver
+	driver.Driver
 	mu   sync.Mutex
 	spec driver.AgentSpec
 }
 
 type staleAttachmentDriver struct {
-	driver.ProtocolDriver
+	driver.Driver
 	mu              sync.Mutex
 	opens           int
 	failFirstPrompt bool
@@ -426,7 +451,7 @@ type staleAttachmentSession struct {
 }
 
 func (d *staleAttachmentDriver) OpenSession(ctx context.Context, key driver.SessionKey, spec driver.AgentSpec, params driver.OpenParams) (*driver.SessionAttachment, error) {
-	att, err := d.ProtocolDriver.OpenSession(ctx, key, spec, params)
+	att, err := d.Driver.OpenSession(ctx, key, spec, params)
 	if err != nil {
 		return nil, err
 	}
@@ -476,11 +501,11 @@ func (d *recordingSpecDriver) OpenSession(ctx context.Context, key driver.Sessio
 	d.mu.Lock()
 	d.spec = spec
 	d.mu.Unlock()
-	return d.ProtocolDriver.OpenSession(ctx, key, spec, params)
+	return d.Driver.OpenSession(ctx, key, spec, params)
 }
 
 func (d *blockingPromptDriver) OpenSession(ctx context.Context, key driver.SessionKey, spec driver.AgentSpec, params driver.OpenParams) (*driver.SessionAttachment, error) {
-	att, err := d.ProtocolDriver.OpenSession(ctx, key, spec, params)
+	att, err := d.Driver.OpenSession(ctx, key, spec, params)
 	if err != nil {
 		return nil, err
 	}
@@ -511,14 +536,14 @@ func (d *blockingOpenDriver) OpenSession(ctx context.Context, key driver.Session
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
-	return d.ProtocolDriver.OpenSession(ctx, key, spec, params)
+	return d.Driver.OpenSession(ctx, key, spec, params)
 }
 
 func TestAgentCloseCannotRaceInANewAttachment(t *testing.T) {
 	fd := fake.New()
-	blocking := &blockingOpenDriver{ProtocolDriver: fd, started: make(chan struct{}), release: make(chan struct{})}
+	blocking := &blockingOpenDriver{Driver: fd, started: make(chan struct{}), release: make(chan struct{})}
 	prev := driverOverride
-	driverOverride = func(AgentKind) (driver.ProtocolDriver, bool) { return blocking, true }
+	driverOverride = func(AgentKind) (driver.Driver, bool) { return blocking, true }
 	t.Cleanup(func() { driverOverride = prev })
 	agent, err := New(Claude)
 	if err != nil {
@@ -553,9 +578,9 @@ func TestAgentCloseCannotRaceInANewAttachment(t *testing.T) {
 
 func TestAgentCloseWaitsForPromptSubmission(t *testing.T) {
 	fd := fake.New()
-	blocking := &blockingPromptDriver{ProtocolDriver: fd, started: make(chan struct{}), release: make(chan struct{})}
+	blocking := &blockingPromptDriver{Driver: fd, started: make(chan struct{}), release: make(chan struct{})}
 	prev := driverOverride
-	driverOverride = func(AgentKind) (driver.ProtocolDriver, bool) { return blocking, true }
+	driverOverride = func(AgentKind) (driver.Driver, bool) { return blocking, true }
 	t.Cleanup(func() { driverOverride = prev })
 	agent, err := New(Claude)
 	if err != nil {
@@ -586,9 +611,9 @@ func TestAgentCloseWaitsForPromptSubmission(t *testing.T) {
 
 func TestInterruptWaitsForPromptSubmission(t *testing.T) {
 	fd := fake.New()
-	blocking := &blockingPromptDriver{ProtocolDriver: fd, started: make(chan struct{}), release: make(chan struct{})}
+	blocking := &blockingPromptDriver{Driver: fd, started: make(chan struct{}), release: make(chan struct{})}
 	prev := driverOverride
-	driverOverride = func(AgentKind) (driver.ProtocolDriver, bool) { return blocking, true }
+	driverOverride = func(AgentKind) (driver.Driver, bool) { return blocking, true }
 	t.Cleanup(func() { driverOverride = prev })
 	agent, err := New(Claude)
 	if err != nil {
@@ -688,9 +713,9 @@ func TestSessionRejectsRuntimeIDChange(t *testing.T) {
 func TestGetSessionUsesPersistedCwdForResume(t *testing.T) {
 	fd := fake.New()
 	fd.SetStoredSessions([]driver.StoredSessionMeta{{SessionID: "stored", Cwd: "/other/repo"}})
-	recording := &recordingSpecDriver{ProtocolDriver: fd}
+	recording := &recordingSpecDriver{Driver: fd}
 	prev := driverOverride
-	driverOverride = func(AgentKind) (driver.ProtocolDriver, bool) { return recording, true }
+	driverOverride = func(AgentKind) (driver.Driver, bool) { return recording, true }
 	t.Cleanup(func() { driverOverride = prev })
 	agent, err := New(Claude, WithCwd("/default/repo"))
 	if err != nil {
@@ -714,9 +739,9 @@ func TestGetSessionUsesPersistedCwdForResume(t *testing.T) {
 
 func TestRunReattachesAClosedDriverSession(t *testing.T) {
 	fd := fake.New()
-	staleDriver := &staleAttachmentDriver{ProtocolDriver: fd}
+	staleDriver := &staleAttachmentDriver{Driver: fd}
 	prev := driverOverride
-	driverOverride = func(AgentKind) (driver.ProtocolDriver, bool) { return staleDriver, true }
+	driverOverride = func(AgentKind) (driver.Driver, bool) { return staleDriver, true }
 	t.Cleanup(func() { driverOverride = prev })
 	agent, err := New(Codex)
 	if err != nil {
@@ -744,9 +769,9 @@ func TestRunReattachesAClosedDriverSession(t *testing.T) {
 
 func TestContinueDropsAClosedBlockedAttachment(t *testing.T) {
 	fd := fake.New()
-	staleDriver := &staleAttachmentDriver{ProtocolDriver: fd}
+	staleDriver := &staleAttachmentDriver{Driver: fd}
 	prev := driverOverride
-	driverOverride = func(AgentKind) (driver.ProtocolDriver, bool) { return staleDriver, true }
+	driverOverride = func(AgentKind) (driver.Driver, bool) { return staleDriver, true }
 	t.Cleanup(func() { driverOverride = prev })
 	agent, err := New(Codex)
 	if err != nil {
@@ -775,9 +800,9 @@ func TestContinueDropsAClosedBlockedAttachment(t *testing.T) {
 
 func TestPromptErrorDropsAClosedAttachment(t *testing.T) {
 	fd := fake.New()
-	staleDriver := &staleAttachmentDriver{ProtocolDriver: fd, failFirstPrompt: true}
+	staleDriver := &staleAttachmentDriver{Driver: fd, failFirstPrompt: true}
 	prev := driverOverride
-	driverOverride = func(AgentKind) (driver.ProtocolDriver, bool) { return staleDriver, true }
+	driverOverride = func(AgentKind) (driver.Driver, bool) { return staleDriver, true }
 	t.Cleanup(func() { driverOverride = prev })
 	agent, err := New(Codex)
 	if err != nil {

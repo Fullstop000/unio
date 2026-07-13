@@ -29,13 +29,12 @@ func TestRawSessionDataAndTokenStatistics(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	d := New()
-	dataSource := d.NewSessionData(context.Background(), driver.AgentSpec{}, "session-id")
-	raw, err := dataSource.Raw()
+	session := &handle{resume: "session-id"}
+	raw, err := session.Raw(context.Background())
 	if err != nil || raw.Format != driver.SessionDataJSONL || string(raw.Data) != string(data) {
 		t.Fatalf("raw = %+v, error = %v", raw, err)
 	}
-	got, err := dataSource.TokenStatistics()
+	got, err := session.TokenStatistics(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +45,7 @@ func TestRawSessionDataAndTokenStatistics(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`{"type":"user","message":{"role":"user"}}`+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := dataSource.TokenStatistics(); !errors.Is(err, driver.NewProtocolError("")) {
+	if _, err := session.TokenStatistics(context.Background()); !errors.Is(err, driver.NewProtocolError("")) {
 		t.Fatalf("incomplete statistics error = %v; want protocol", err)
 	}
 }
@@ -59,7 +58,7 @@ func TestRawSessionDataPreservesCancellation(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err := New().NewSessionData(ctx, driver.AgentSpec{}, "session-id").Raw()
+	_, err := (&handle{resume: "session-id"}).Raw(ctx)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("error = %v; want context.Canceled", err)
 	}

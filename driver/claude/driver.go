@@ -9,7 +9,7 @@ import (
 	"github.com/Fullstop000/unio/driver"
 )
 
-// Driver implements driver.ProtocolDriver for Claude Code headless mode. Claude
+// Driver implements driver.Driver for Claude Code headless mode. Claude
 // is process-per-session, so the driver holds no shared child; each session owns
 // its own. The factory field lets tests inject a scripted transport.
 type Driver struct {
@@ -27,18 +27,15 @@ func newWithTransport(f transportFactory) *Driver {
 	return &Driver{factory: f}
 }
 
-// Transport implements driver.ProtocolDriver.
-func (d *Driver) Transport() driver.Transport { return driver.TransportClaudeStreamJSON }
-
 // Probe reports installed/authed state. Auth beyond "installed" is not
 // separately detectable without a network call, so a present binary reports
 // authed; a missing one reports not-installed.
-func (d *Driver) Probe(ctx context.Context) (driver.RuntimeProbe, error) {
+func (d *Driver) Probe(ctx context.Context) (driver.ProbeAuth, error) {
 	spec := driver.AgentSpec{ExecutablePath: "claude"}
 	if _, err := driver.ResolveExecutable(spec); err != nil {
-		return driver.RuntimeProbe{Auth: driver.AuthNotInstalled, Transport: driver.TransportClaudeStreamJSON}, nil
+		return driver.AuthNotInstalled, nil
 	}
-	return driver.RuntimeProbe{Auth: driver.AuthAuthed, Transport: driver.TransportClaudeStreamJSON}, nil
+	return driver.AuthAuthed, nil
 }
 
 func (d *Driver) ListSessions(ctx context.Context, params driver.ListSessionsParams) ([]driver.StoredSessionMeta, error) {
@@ -495,8 +492,8 @@ func claudeSessionAlive(cwd, sessionID string) bool {
 
 // Compile-time interface checks.
 var (
-	_ driver.ProtocolDriver = (*Driver)(nil)
-	_ driver.Session        = (*handle)(nil)
+	_ driver.Driver  = (*Driver)(nil)
+	_ driver.Session = (*handle)(nil)
 )
 
 // small fs helpers kept here to avoid an extra file; overridable in tests.

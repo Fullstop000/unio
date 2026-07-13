@@ -48,14 +48,14 @@ func (s *Session) State() SessionState {
 func (s *Session) Raw(ctx context.Context) (RawSessionData, error) {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
-	data, err := s.sessionData(ctx)
+	inner, err := s.dataSession(ctx)
 	if err != nil {
 		return RawSessionData{}, err
 	}
-	return data.Raw()
+	return inner.Raw(ctx)
 }
 
-func (s *Session) sessionData(ctx context.Context) (*driver.SessionData, error) {
+func (s *Session) dataSession(ctx context.Context) (driver.Session, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -72,11 +72,12 @@ func (s *Session) sessionData(ctx context.Context) (*driver.SessionData, error) 
 	if id == "" {
 		return nil, errs.InvalidState("session has no runtime ID")
 	}
-	spec := s.agent.cfg.spec()
-	if s.cwd != "" {
-		spec.Cwd = s.cwd
+	if err := s.ensureHandle(ctx); err != nil {
+		return nil, err
 	}
-	return s.agent.driver.NewSessionData(ctx, spec, driver.SessionID(id)), nil
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.inner, nil
 }
 
 // TokenStatistics returns cumulative token usage recorded for this session.
@@ -84,11 +85,11 @@ func (s *Session) sessionData(ctx context.Context) (*driver.SessionData, error) 
 func (s *Session) TokenStatistics(ctx context.Context) (TokenStatistics, error) {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
-	data, err := s.sessionData(ctx)
+	inner, err := s.dataSession(ctx)
 	if err != nil {
 		return TokenStatistics{}, err
 	}
-	usage, err := data.TokenStatistics()
+	usage, err := inner.TokenStatistics(ctx)
 	if err != nil {
 		return TokenStatistics{}, err
 	}
@@ -155,6 +156,43 @@ func (s *Session) Stream(ctx context.Context, prompt string) (*Stream, error) {
 }
 
 func (s *Session) ensureAttached(ctx context.Context) error {
+	if err := s.ensureHandle(ctx); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	inner := s.inner
+	s.mu.Unlock()
+	if inner.ProcessState().Phase == driver.PhaseActive {
+		return nil
+	}
+	if err := inner.Run(ctx, nil); err != nil {
+		s.mu.Lock()
+		if s.inner == inner {
+			s.inner = nil
+			s.events = nil
+		}
+		s.mu.Unlock()
+		_ = inner.Close(context.Background())
+		return err
+	}
+	sid := inner.SessionID()
+	s.mu.Lock()
+	if s.agent.closed.Load() {
+		s.mu.Unlock()
+		_ = inner.Close(context.Background())
+		return errs.InvalidState("agent is closed")
+	}
+	if sid != "" {
+		s.id = sid
+	}
+	s.mu.Unlock()
+	if sid != "" {
+		return s.agent.register(s, sid)
+	}
+	return nil
+}
+
+func (s *Session) ensureHandle(ctx context.Context) error {
 	s.mu.Lock()
 	if s.inner != nil {
 		if s.inner.ProcessState().Phase != driver.PhaseClosed {
@@ -180,10 +218,6 @@ func (s *Session) ensureAttached(ctx context.Context) error {
 		return err
 	}
 	events := att.Events.Subscribe()
-	if err := att.Session.Run(ctx, nil); err != nil {
-		_ = att.Session.Close(context.Background())
-		return err
-	}
 	s.mu.Lock()
 	if s.agent.closed.Load() {
 		s.mu.Unlock()
@@ -192,14 +226,7 @@ func (s *Session) ensureAttached(ctx context.Context) error {
 	}
 	s.inner = att.Session
 	s.events = events
-	sid := att.Session.SessionID()
-	if sid != "" {
-		s.id = sid
-	}
 	s.mu.Unlock()
-	if sid != "" {
-		return s.agent.register(s, sid)
-	}
 	return nil
 }
 

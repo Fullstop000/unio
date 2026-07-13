@@ -15,17 +15,23 @@ import (
 	"github.com/Fullstop000/unio/driver"
 )
 
-func (d *Driver) NewSessionData(ctx context.Context, _ driver.AgentSpec, sessionID driver.SessionID) *driver.SessionData {
-	runtime := d.cfg.name
-	return driver.NewSessionData(
-		ctx,
-		func(ctx context.Context) (driver.RawSessionData, error) {
-			return readACPSessionData(ctx, runtime, sessionID)
-		},
-		func(ctx context.Context, raw driver.RawSessionData) (driver.TokenUsage, error) {
-			return parseACPSessionTokenStatistics(ctx, runtime, raw)
-		},
-	)
+func (s *session) Raw(ctx context.Context) (driver.RawSessionData, error) {
+	return readACPSessionData(ctx, s.proc.cfg.name, s.dataSessionID())
+}
+
+func (s *session) TokenStatistics(ctx context.Context) (driver.TokenUsage, error) {
+	raw, err := s.Raw(ctx)
+	if err != nil {
+		return driver.TokenUsage{}, err
+	}
+	return parseACPSessionTokenStatistics(ctx, s.proc.cfg.name, raw)
+}
+
+func (s *session) dataSessionID() driver.SessionID {
+	if sessionID := s.SessionID(); sessionID != "" {
+		return sessionID
+	}
+	return s.resume
 }
 
 func readACPSessionData(ctx context.Context, runtime string, sessionID driver.SessionID) (driver.RawSessionData, error) {

@@ -252,7 +252,7 @@ func TestFakeNotInstalled(t *testing.T) {
 func TestFakeProbeAndListSessions(t *testing.T) {
 	d := New()
 	pr, err := d.Probe(context.Background())
-	if err != nil || pr.Auth != driver.AuthAuthed || pr.Transport != driver.TransportFake {
+	if err != nil || pr != driver.AuthAuthed {
 		t.Fatalf("unexpected probe: %+v err=%v", pr, err)
 	}
 	d.SetStoredSessions([]driver.StoredSessionMeta{

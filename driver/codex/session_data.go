@@ -14,14 +14,23 @@ import (
 	"github.com/Fullstop000/unio/driver"
 )
 
-func (d *Driver) NewSessionData(ctx context.Context, _ driver.AgentSpec, sessionID driver.SessionID) *driver.SessionData {
-	return driver.NewSessionData(
-		ctx,
-		func(ctx context.Context) (driver.RawSessionData, error) {
-			return readCodexSessionData(ctx, sessionID)
-		},
-		parseCodexTokenStatistics,
-	)
+func (s *session) Raw(ctx context.Context) (driver.RawSessionData, error) {
+	return readCodexSessionData(ctx, s.dataSessionID())
+}
+
+func (s *session) TokenStatistics(ctx context.Context) (driver.TokenUsage, error) {
+	raw, err := s.Raw(ctx)
+	if err != nil {
+		return driver.TokenUsage{}, err
+	}
+	return parseCodexTokenStatistics(ctx, raw)
+}
+
+func (s *session) dataSessionID() driver.SessionID {
+	if sessionID := s.SessionID(); sessionID != "" {
+		return sessionID
+	}
+	return s.resume
 }
 
 func readCodexSessionData(ctx context.Context, sessionID driver.SessionID) (driver.RawSessionData, error) {

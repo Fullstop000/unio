@@ -1,4 +1,4 @@
-// Package claude implements the unio ProtocolDriver for Claude Code's headless
+// Package claude implements the unio Driver for Claude Code's headless
 // streaming-JSON mode (`claude -p --output-format stream-json`).
 //
 // Transport model: process-per-session. Claude's headless CLI cannot multiplex

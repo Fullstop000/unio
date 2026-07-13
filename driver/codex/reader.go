@@ -2,8 +2,6 @@ package codex
 
 import (
 	"encoding/json"
-
-	"github.com/Fullstop000/unio/driver"
 )
 
 // readerLoop consumes the shared child's stdout, routing responses to their
@@ -121,5 +119,3 @@ func responseID(line string) (uint64, bool) {
 	}
 	return uint64(f), true
 }
-
-var _ = driver.TransportCodexAppServer

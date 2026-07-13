@@ -16,7 +16,7 @@
 //   - Enums-with-payload from the Rust original become struct + string type-tag
 //     here, which is idiomatic Go and keeps the event envelope flat and
 //     serialisable.
-//   - The three responsibilities are kept distinct: ProtocolDriver (a factory +
+//   - The three responsibilities are kept distinct: Driver (a factory +
 //     session-lifecycle owner), Session (one live conversation handle), and
 //     AgentProcess (a cached OS process that a Registry evicts when stale).
 //
@@ -30,25 +30,6 @@ import (
 	"time"
 
 	"github.com/Fullstop000/unio/errs"
-)
-
-// Transport identifies how a driver talks to its underlying runtime. It doubles
-// as the capability selector a host uses to route an agent to the right driver.
-type Transport string
-
-const (
-	// TransportFake is the in-memory test double (driver/fake). It spawns no
-	// process and is used to prove the abstraction end-to-end.
-	TransportFake Transport = "fake"
-	// TransportACPNative speaks the Agent Client Protocol natively over stdio.
-	// Backs Trae (`traecli acp`), Kimi, OpenCode, Gemini, … via one shared layer.
-	TransportACPNative Transport = "acp_native"
-	// TransportCodexAppServer speaks Codex's app-server JSON-RPC over stdio.
-	// One child multiplexes many threads (= sessions).
-	TransportCodexAppServer Transport = "codex_app_server"
-	// TransportClaudeStreamJSON speaks Claude Code's `--output-format stream-json`.
-	// One child per session (Claude cannot multiplex).
-	TransportClaudeStreamJSON Transport = "claude_stream_json"
 )
 
 // Phase is the lifecycle phase of a Session's underlying runtime, as observed by
@@ -206,14 +187,8 @@ const (
 	AuthAuthed ProbeAuth = "authed"
 )
 
-// RuntimeProbe is the aggregate result of probing a runtime for availability.
-type RuntimeProbe struct {
-	Auth      ProbeAuth
-	Transport Transport
-}
-
 // StoredSessionMeta describes a previously-stored session recovered from a
-// runtime's on-disk history. Returned by ProtocolDriver.ListSessions and is the
+// runtime's on-disk history. Returned by Driver.ListSessions and is the
 // SDK-side support for a "session searcher" host feature.
 type StoredSessionMeta struct {
 	SessionID    SessionID
@@ -283,33 +258,26 @@ type AgentSpec struct {
 	SystemPrompt string
 }
 
-// SessionAttachment is the return value of ProtocolDriver.OpenSession: a live
+// SessionAttachment is the return value of Driver.OpenSession: a live
 // Session handle plus the event stream it publishes to.
 type SessionAttachment struct {
 	Session Session
 	Events  *EventBus
 }
 
-// ProtocolDriver is the runtime-level factory. One instance per runtime kind
+// Driver is the runtime-level factory. One instance per runtime kind
 // (Claude, Codex, an ACP agent, Fake). It owns session lifecycle: OpenSession
 // yields a fresh Session (new or resumed).
 //
 // Implementations must be safe for concurrent use: a host may open sessions for
 // several agents of the same runtime kind at once.
-type ProtocolDriver interface {
-	// Transport returns which transport this driver speaks.
-	Transport() Transport
-
+type Driver interface {
 	// Probe detects whether the runtime is installed and authenticated.
-	Probe(ctx context.Context) (RuntimeProbe, error)
+	Probe(ctx context.Context) (ProbeAuth, error)
 
 	// ListSessions enumerates previously-stored sessions for this runtime on
 	// this host. Drivers that cannot enumerate return an unsupported error.
 	ListSessions(ctx context.Context, params ListSessionsParams) ([]StoredSessionMeta, error)
-
-	// NewSessionData creates an accessor for one runtime-owned persisted
-	// session. Unsupported accessors return unsupported from their methods.
-	NewSessionData(ctx context.Context, spec AgentSpec, sessionID SessionID) *SessionData
 
 	// OpenSession opens a session for the given key. The returned Session is in
 	// PhaseIdle; the caller must invoke Session.Run to bring it online.
@@ -344,6 +312,12 @@ type Session interface {
 
 	// ProcessState returns the current lifecycle snapshot.
 	ProcessState() ProcessState
+
+	// Raw returns the runtime-owned persisted representation of this session.
+	Raw(ctx context.Context) (RawSessionData, error)
+
+	// TokenStatistics returns cumulative usage parsed from Raw.
+	TokenStatistics(ctx context.Context) (TokenUsage, error)
 
 	// Run brings the session online (spawning or attaching the runtime as
 	// needed). If initPrompt is non-nil it is delivered as the first turn so

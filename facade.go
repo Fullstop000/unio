@@ -182,17 +182,17 @@ func WithEnv(env ...string) Option {
 
 var sessionSeq atomic.Uint64
 
-var driverOverride func(AgentKind) (driver.ProtocolDriver, bool)
+var driverOverride func(AgentKind) (driver.Driver, bool)
 
-var driverFactories = map[AgentKind]func() driver.ProtocolDriver{
-	Claude:   func() driver.ProtocolDriver { return claudedrv.New() },
-	Codex:    func() driver.ProtocolDriver { return codexdrv.New() },
-	Kimi:     func() driver.ProtocolDriver { return acpdrv.New(acpdrv.Kimi) },
-	TraeX:    func() driver.ProtocolDriver { return acpdrv.New(acpdrv.TraeX) },
-	OpenCode: func() driver.ProtocolDriver { return acpdrv.New(acpdrv.OpenCode) },
+var driverFactories = map[AgentKind]func() driver.Driver{
+	Claude:   func() driver.Driver { return claudedrv.New() },
+	Codex:    func() driver.Driver { return codexdrv.New() },
+	Kimi:     func() driver.Driver { return acpdrv.New(acpdrv.Kimi) },
+	TraeX:    func() driver.Driver { return acpdrv.New(acpdrv.TraeX) },
+	OpenCode: func() driver.Driver { return acpdrv.New(acpdrv.OpenCode) },
 }
 
-func driverFor(kind AgentKind) (driver.ProtocolDriver, error) {
+func driverFor(kind AgentKind) (driver.Driver, error) {
 	if driverOverride != nil {
 		if d, ok := driverOverride(kind); ok {
 			return d, nil

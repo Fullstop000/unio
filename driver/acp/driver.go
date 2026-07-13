@@ -8,7 +8,7 @@ import (
 	"github.com/Fullstop000/unio/driver"
 )
 
-// Driver implements driver.ProtocolDriver for one ACP-native runtime.
+// Driver implements driver.Driver for one ACP-native runtime.
 type Driver struct {
 	cfg     runtimeConfig
 	factory transportFactory
@@ -26,14 +26,12 @@ func newWithTransport(runtime Runtime, factory transportFactory) *Driver {
 	return &Driver{cfg: configFor(runtime), factory: factory}
 }
 
-func (d *Driver) Transport() driver.Transport { return driver.TransportACPNative }
-
-func (d *Driver) Probe(ctx context.Context) (driver.RuntimeProbe, error) {
+func (d *Driver) Probe(ctx context.Context) (driver.ProbeAuth, error) {
 	spec := d.cfg.applyDefaults(driver.AgentSpec{})
 	if _, err := driver.ResolveExecutable(spec); err != nil {
-		return driver.RuntimeProbe{Auth: driver.AuthNotInstalled, Transport: driver.TransportACPNative}, nil
+		return driver.AuthNotInstalled, nil
 	}
-	return driver.RuntimeProbe{Auth: driver.AuthAuthed, Transport: driver.TransportACPNative}, nil
+	return driver.AuthAuthed, nil
 }
 
 func (d *Driver) ListSessions(ctx context.Context, params driver.ListSessionsParams) ([]driver.StoredSessionMeta, error) {
@@ -111,4 +109,4 @@ func (d *Driver) prepareSpec(spec driver.AgentSpec) driver.AgentSpec {
 	return spec
 }
 
-var _ driver.ProtocolDriver = (*Driver)(nil)
+var _ driver.Driver = (*Driver)(nil)

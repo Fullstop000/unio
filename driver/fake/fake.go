@@ -1,4 +1,4 @@
-// Package fake provides an in-memory ProtocolDriver/Session implementation that
+// Package fake provides an in-memory Driver/Session implementation that
 // spawns no process. It exists to prove the driver abstraction end-to-end and to
 // serve as a test double for hosts: a session can be scripted to emit an
 // arbitrary sequence of events per prompt, and resume is modelled by
@@ -28,14 +28,14 @@ type Script struct {
 	InterruptWait <-chan struct{}
 }
 
-// Driver is an in-memory ProtocolDriver. It mints monotonic session ids and
+// Driver is an in-memory Driver. It mints monotonic session ids and
 // hands each opened session an optional queue of Scripts consumed one-per-Prompt.
 type Driver struct {
 	mu             sync.Mutex
 	seq            atomic.Uint64
 	stored         []driver.StoredSessionMeta
 	scripts        map[driver.SessionKey][]Script
-	probe          driver.RuntimeProbe
+	probe          driver.ProbeAuth
 	probeErr       error
 	requireInstall bool
 }
@@ -44,15 +44,12 @@ type Driver struct {
 func New() *Driver {
 	return &Driver{
 		scripts: make(map[driver.SessionKey][]Script),
-		probe: driver.RuntimeProbe{
-			Auth:      driver.AuthAuthed,
-			Transport: driver.TransportFake,
-		},
+		probe:   driver.AuthAuthed,
 	}
 }
 
 // SetProbe overrides what Probe returns (test knob).
-func (d *Driver) SetProbe(p driver.RuntimeProbe, err error) {
+func (d *Driver) SetProbe(p driver.ProbeAuth, err error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.probe = p
@@ -83,17 +80,14 @@ func (d *Driver) ScriptSession(key driver.SessionKey, scripts ...Script) {
 	d.scripts[key] = append(d.scripts[key], scripts...)
 }
 
-// Transport implements driver.ProtocolDriver.
-func (d *Driver) Transport() driver.Transport { return driver.TransportFake }
-
-// Probe implements driver.ProtocolDriver.
-func (d *Driver) Probe(ctx context.Context) (driver.RuntimeProbe, error) {
+// Probe implements driver.Driver.
+func (d *Driver) Probe(ctx context.Context) (driver.ProbeAuth, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.probe, d.probeErr
 }
 
-// ListSessions implements driver.ProtocolDriver.
+// ListSessions implements driver.Driver.
 func (d *Driver) ListSessions(ctx context.Context, params driver.ListSessionsParams) ([]driver.StoredSessionMeta, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -106,11 +100,7 @@ func (d *Driver) ListSessions(ctx context.Context, params driver.ListSessionsPar
 	return out, nil
 }
 
-func (d *Driver) NewSessionData(ctx context.Context, _ driver.AgentSpec, _ driver.SessionID) *driver.SessionData {
-	return driver.NewSessionData(ctx, nil, nil)
-}
-
-// OpenSession implements driver.ProtocolDriver.
+// OpenSession implements driver.Driver.
 func (d *Driver) OpenSession(ctx context.Context, key driver.SessionKey, spec driver.AgentSpec, params driver.OpenParams) (*driver.SessionAttachment, error) {
 	d.mu.Lock()
 	require := d.requireInstall
@@ -186,6 +176,14 @@ func (s *session) ProcessState() driver.ProcessState {
 		return *p
 	}
 	return driver.ProcessState{Phase: driver.PhaseIdle}
+}
+
+func (s *session) Raw(context.Context) (driver.RawSessionData, error) {
+	return driver.RawSessionData{}, driver.NewUnsupportedError("fake: raw session data are not supported")
+}
+
+func (s *session) TokenStatistics(context.Context) (driver.TokenUsage, error) {
+	return driver.TokenUsage{}, driver.NewUnsupportedError("fake: session token statistics are not supported")
 }
 
 func (s *session) setState(st driver.ProcessState) {
@@ -386,6 +384,6 @@ func (s *session) Close(ctx context.Context) error {
 
 // Compile-time interface checks.
 var (
-	_ driver.ProtocolDriver = (*Driver)(nil)
-	_ driver.Session        = (*session)(nil)
+	_ driver.Driver  = (*Driver)(nil)
+	_ driver.Session = (*session)(nil)
 )

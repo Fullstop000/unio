@@ -29,11 +29,8 @@ func testAgentSpec() driver.AgentSpec {
 
 func TestDriverBasicsAndRuntimeConfiguration(t *testing.T) {
 	d := New(Runtime("definitely-not-installed-unio-test"))
-	if d.Transport() != driver.TransportACPNative {
-		t.Fatalf("transport = %q", d.Transport())
-	}
 	probe, err := d.Probe(context.Background())
-	if err != nil || probe.Auth != driver.AuthNotInstalled {
+	if err != nil || probe != driver.AuthNotInstalled {
 		t.Fatalf("probe=%+v err=%v", probe, err)
 	}
 	if got := configFor(Kimi).buildArgs(driver.AgentSpec{Cwd: "/repo", Model: "m", ExtraArgs: []string{"--x"}}); !slices.Equal(got, []string{"--work-dir", "/repo", "--model", "m", "--x", "acp"}) {

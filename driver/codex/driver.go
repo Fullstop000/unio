@@ -17,7 +17,7 @@ import (
 // version reported to the app-server in initialize.
 const clientVersion = "0.1.0"
 
-// Driver implements driver.ProtocolDriver for Codex app-server. One shared child
+// Driver implements driver.Driver for Codex app-server. One shared child
 // per agent key multiplexes threads; the registry caches it and evicts on death.
 type Driver struct {
 	mu      sync.Mutex
@@ -34,15 +34,12 @@ func newWithTransport(f transportFactory) *Driver {
 	return &Driver{factory: f}
 }
 
-// Transport implements driver.ProtocolDriver.
-func (d *Driver) Transport() driver.Transport { return driver.TransportCodexAppServer }
-
 // Probe reports installed/authed state based on binary presence.
-func (d *Driver) Probe(ctx context.Context) (driver.RuntimeProbe, error) {
+func (d *Driver) Probe(ctx context.Context) (driver.ProbeAuth, error) {
 	if _, err := driver.ResolveExecutable(driver.AgentSpec{ExecutablePath: "codex"}); err != nil {
-		return driver.RuntimeProbe{Auth: driver.AuthNotInstalled, Transport: driver.TransportCodexAppServer}, nil
+		return driver.AuthNotInstalled, nil
 	}
-	return driver.RuntimeProbe{Auth: driver.AuthAuthed, Transport: driver.TransportCodexAppServer}, nil
+	return driver.AuthAuthed, nil
 }
 
 func (d *Driver) ListSessions(ctx context.Context, params driver.ListSessionsParams) ([]driver.StoredSessionMeta, error) {
@@ -556,6 +553,6 @@ func waitResp(ctx context.Context, ch chan AppServerEvent, closed chan struct{})
 
 // Compile-time interface checks.
 var (
-	_ driver.ProtocolDriver = (*Driver)(nil)
-	_ driver.Session        = (*session)(nil)
+	_ driver.Driver  = (*Driver)(nil)
+	_ driver.Session = (*session)(nil)
 )
