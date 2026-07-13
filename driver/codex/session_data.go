@@ -87,11 +87,16 @@ func parseCodexTokenStatistics(ctx context.Context, raw driver.RawSessionData) (
 		return driver.TokenUsage{}, driver.NewProtocolError("codex: unsupported session data format: " + string(raw.Format))
 	}
 	var total driver.TokenUsage
+	pendingTasks := 0
 	scanner := bufio.NewScanner(bytes.NewReader(raw.Data))
 	scanner.Buffer(make([]byte, 64*1024), 16*1024*1024)
 	for scanner.Scan() {
 		if err := ctx.Err(); err != nil {
 			return driver.TokenUsage{}, err
+		}
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
+			continue
 		}
 		var record struct {
 			Type    string `json:"type"`
@@ -106,17 +111,32 @@ func parseCodexTokenStatistics(ctx context.Context, raw driver.RawSessionData) (
 				} `json:"info"`
 			} `json:"payload"`
 		}
-		if json.Unmarshal(scanner.Bytes(), &record) != nil || record.Type != "event_msg" || record.Payload.Type != "token_count" {
+		if err := json.Unmarshal(line, &record); err != nil {
+			return driver.TokenUsage{}, driver.NewProtocolError("codex: parse session data: invalid JSONL record")
+		}
+		if record.Type != "event_msg" {
 			continue
 		}
-		usage := record.Payload.Info.Total
-		total = driver.TokenUsage{
-			InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens,
-			CacheReadTokens: usage.CachedInputTokens,
+		switch record.Payload.Type {
+		case "task_started":
+			pendingTasks++
+		case "task_complete", "turn_aborted":
+			if pendingTasks > 0 {
+				pendingTasks--
+			}
+		case "token_count":
+			usage := record.Payload.Info.Total
+			total = driver.TokenUsage{
+				InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens,
+				CacheReadTokens: usage.CachedInputTokens,
+			}
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		return driver.TokenUsage{}, driver.NewProtocolError("codex: parse session data: " + err.Error())
+	}
+	if pendingTasks != 0 {
+		return driver.TokenUsage{}, driver.NewProtocolError("codex: latest task is not fully persisted yet")
 	}
 	return total, nil
 }

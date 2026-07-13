@@ -137,24 +137,52 @@ func findKimiWire(ctx context.Context, home, sessionID string) (string, error) {
 
 func parseKimiStatistics(ctx context.Context, input io.Reader) (driver.TokenUsage, error) {
 	var total driver.TokenUsage
+	openSteps := make(map[string]map[string]struct{})
 	scanner := sessionScanner(input)
 	for scanner.Scan() {
 		if err := ctx.Err(); err != nil {
 			return driver.TokenUsage{}, err
 		}
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
+			continue
+		}
 		var record struct {
-			Type       string    `json:"type"`
-			UsageScope string    `json:"usageScope"`
-			Usage      kimiUsage `json:"usage"`
-			Message    struct {
+			Type       string          `json:"type"`
+			UsageScope string          `json:"usageScope"`
+			Usage      kimiUsage       `json:"usage"`
+			TurnID     json.RawMessage `json:"turnId"`
+			Event      struct {
+				Type   string          `json:"type"`
+				TurnID json.RawMessage `json:"turnId"`
+				UUID   string          `json:"uuid"`
+			} `json:"event"`
+			Message struct {
 				Type    string `json:"type"`
 				Payload struct {
 					Usage kimiUsage `json:"token_usage"`
 				} `json:"payload"`
 			} `json:"message"`
 		}
-		if json.Unmarshal(scanner.Bytes(), &record) != nil {
-			continue
+		if err := json.Unmarshal(line, &record); err != nil {
+			return driver.TokenUsage{}, driver.NewProtocolError("acp: parse Kimi session data: invalid JSONL record")
+		}
+		switch {
+		case record.Type == "context.append_loop_event" && record.Event.Type == "step.begin" && record.Event.UUID != "":
+			turnID := string(bytes.TrimSpace(record.Event.TurnID))
+			if openSteps[turnID] == nil {
+				openSteps[turnID] = make(map[string]struct{})
+			}
+			openSteps[turnID][record.Event.UUID] = struct{}{}
+		case record.Type == "context.append_loop_event" && record.Event.Type == "step.end" && record.Event.UUID != "":
+			for turnID, steps := range openSteps {
+				delete(steps, record.Event.UUID)
+				if len(steps) == 0 {
+					delete(openSteps, turnID)
+				}
+			}
+		case record.Type == "turn.cancel":
+			delete(openSteps, string(bytes.TrimSpace(record.TurnID)))
 		}
 		switch {
 		case record.Type == "usage.record" && record.UsageScope == "turn":
@@ -165,6 +193,9 @@ func parseKimiStatistics(ctx context.Context, input io.Reader) (driver.TokenUsag
 	}
 	if err := scanner.Err(); err != nil {
 		return driver.TokenUsage{}, driver.NewProtocolError("acp: parse Kimi session data: " + err.Error())
+	}
+	if len(openSteps) != 0 {
+		return driver.TokenUsage{}, driver.NewProtocolError("acp: latest Kimi step is not fully persisted yet")
 	}
 	return total, nil
 }
@@ -243,10 +274,15 @@ func findTraeXRollout(ctx context.Context, home, sessionID string) (string, erro
 
 func parseTraeXStatistics(ctx context.Context, input io.Reader) (driver.TokenUsage, error) {
 	var total driver.TokenUsage
+	pendingTasks := 0
 	scanner := sessionScanner(input)
 	for scanner.Scan() {
 		if err := ctx.Err(); err != nil {
 			return driver.TokenUsage{}, err
+		}
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
+			continue
 		}
 		var record struct {
 			Type    string `json:"type"`
@@ -262,17 +298,32 @@ func parseTraeXStatistics(ctx context.Context, input io.Reader) (driver.TokenUsa
 				} `json:"info"`
 			} `json:"payload"`
 		}
-		if json.Unmarshal(scanner.Bytes(), &record) != nil || record.Type != "event_msg" || record.Payload.Type != "token_count" {
+		if err := json.Unmarshal(line, &record); err != nil {
+			return driver.TokenUsage{}, driver.NewProtocolError("acp: parse TraeX session data: invalid JSONL record")
+		}
+		if record.Type != "event_msg" {
 			continue
 		}
-		last := record.Payload.Info.Last
-		total.Add(driver.TokenUsage{
-			InputTokens: last.InputTokens, OutputTokens: last.OutputTokens,
-			CacheReadTokens: last.CachedInputTokens, CacheWriteTokens: last.CacheCreation,
-		})
+		switch record.Payload.Type {
+		case "task_started":
+			pendingTasks++
+		case "task_complete", "turn_aborted":
+			if pendingTasks > 0 {
+				pendingTasks--
+			}
+		case "token_count":
+			last := record.Payload.Info.Last
+			total.Add(driver.TokenUsage{
+				InputTokens: last.InputTokens, OutputTokens: last.OutputTokens,
+				CacheReadTokens: last.CachedInputTokens, CacheWriteTokens: last.CacheCreation,
+			})
+		}
 	}
 	if err := scanner.Err(); err != nil {
 		return driver.TokenUsage{}, driver.NewProtocolError("acp: parse TraeX session data: " + err.Error())
+	}
+	if pendingTasks != 0 {
+		return driver.TokenUsage{}, driver.NewProtocolError("acp: latest task is not fully persisted yet")
 	}
 	return total, nil
 }

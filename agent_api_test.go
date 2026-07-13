@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -32,6 +33,38 @@ type statisticsSession struct {
 	driver.Session
 	raw   driver.RawSessionData
 	usage driver.TokenUsage
+}
+
+type nonActiveStateDriver struct {
+	*fake.Driver
+	runCalls atomic.Uint64
+}
+
+func (d *nonActiveStateDriver) OpenSession(params driver.OpenParams) (*driver.SessionAttachment, error) {
+	attachment, err := d.Driver.OpenSession(params)
+	if err != nil {
+		return nil, err
+	}
+	attachment.Session = &nonActiveStateSession{Session: attachment.Session, runCalls: &d.runCalls}
+	return attachment, nil
+}
+
+type nonActiveStateSession struct {
+	driver.Session
+	runCalls *atomic.Uint64
+}
+
+func (s *nonActiveStateSession) Run(prompt *driver.PromptReq) error {
+	s.runCalls.Add(1)
+	return s.Session.Run(prompt)
+}
+
+func (s *nonActiveStateSession) ProcessState() driver.ProcessState {
+	state := s.Session.ProcessState()
+	if state.Phase == driver.PhaseActive {
+		state.Phase = driver.PhasePromptInFlight
+	}
+	return state
 }
 
 func (s *statisticsSession) Raw() (driver.RawSessionData, error) {
@@ -91,6 +124,23 @@ func TestRunSetsRuntimeIDAndReturnsToIdle(t *testing.T) {
 	}
 	if result.Text != "echo: hello" || session.ID() == "" || session.State() != Idle {
 		t.Fatalf("result=%+v id=%q state=%q", result, session.ID(), session.State())
+	}
+}
+
+func TestRunDoesNotRestartAnAttachedSession(t *testing.T) {
+	fd := &nonActiveStateDriver{Driver: fake.New(context.Background(), driver.AgentSpec{})}
+	agent := newAgentWithDriverOptions(t, fd)
+	session, err := agent.NewSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, prompt := range []string{"one", "two"} {
+		if _, err := session.Run(prompt); err != nil {
+			t.Fatalf("Run(%q): %v", prompt, err)
+		}
+	}
+	if got := fd.runCalls.Load(); got != 1 {
+		t.Fatalf("handle Run calls = %d; want 1", got)
 	}
 }
 

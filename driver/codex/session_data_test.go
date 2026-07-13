@@ -55,3 +55,19 @@ func TestRawSessionDataPreservesCancellation(t *testing.T) {
 		t.Fatalf("error = %v; want context.Canceled", err)
 	}
 }
+
+func TestTokenStatisticsRejectsIncompleteSessionData(t *testing.T) {
+	for name, data := range map[string][]byte{
+		"partial JSONL record": []byte(`{"type":"event_msg"`),
+		"unfinished task":      []byte(`{"type":"event_msg","payload":{"type":"task_started"}}` + "\n"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := parseCodexTokenStatistics(context.Background(), driver.RawSessionData{
+				Format: driver.SessionDataJSONL, Data: data,
+			})
+			if !errors.Is(err, driver.NewProtocolError("")) {
+				t.Fatalf("error = %v; want protocol", err)
+			}
+		})
+	}
+}

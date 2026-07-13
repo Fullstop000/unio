@@ -12,13 +12,14 @@ type Session struct {
 	agent *Agent
 	opMu  sync.Mutex
 
-	mu     sync.Mutex
-	state  SessionState
-	id     string
-	cwd    string // immutable after the handle is published
-	inner  driver.Session
-	events <-chan driver.AgentEvent
-	active *Stream
+	mu      sync.Mutex
+	state   SessionState
+	id      string
+	cwd     string // immutable after the handle is published
+	inner   driver.Session
+	events  <-chan driver.AgentEvent
+	started bool // true once inner.Run has successfully initialized this attachment
+	active  *Stream
 }
 
 func newSession(agent *Agent, id, cwd string) *Session {
@@ -139,6 +140,7 @@ func (s *Session) Stream(prompt string) (*Stream, error) {
 			if s.inner == inner {
 				s.inner = nil
 				s.events = nil
+				s.started = false
 			}
 			s.mu.Unlock()
 			_ = inner.Close()
@@ -159,8 +161,9 @@ func (s *Session) ensureAttached() error {
 	}
 	s.mu.Lock()
 	inner := s.inner
+	started := s.started
 	s.mu.Unlock()
-	if inner.ProcessState().Phase == driver.PhaseActive {
+	if started {
 		return nil
 	}
 	if err := inner.Run(nil); err != nil {
@@ -168,6 +171,7 @@ func (s *Session) ensureAttached() error {
 		if s.inner == inner {
 			s.inner = nil
 			s.events = nil
+			s.started = false
 		}
 		s.mu.Unlock()
 		_ = inner.Close()
@@ -183,6 +187,7 @@ func (s *Session) ensureAttached() error {
 	if sid != "" {
 		s.id = sid
 	}
+	s.started = true
 	s.mu.Unlock()
 	if sid != "" {
 		return s.agent.register(s, sid)
@@ -200,6 +205,7 @@ func (s *Session) ensureHandle() error {
 		stale := s.inner
 		s.inner = nil
 		s.events = nil
+		s.started = false
 		s.mu.Unlock()
 		_ = stale.Close()
 		s.mu.Lock()
@@ -220,6 +226,7 @@ func (s *Session) ensureHandle() error {
 	}
 	s.inner = att.Session
 	s.events = events
+	s.started = false
 	s.mu.Unlock()
 	return nil
 }
@@ -248,6 +255,7 @@ func (s *Session) Interrupt() error {
 		if s.inner == inner {
 			s.inner = nil
 			s.events = nil
+			s.started = false
 		}
 		s.mu.Unlock()
 	}
@@ -276,6 +284,7 @@ func (s *Session) Continue(input string) (Result, error) {
 	if inner == nil || inner.ProcessState().Phase == driver.PhaseClosed {
 		s.inner = nil
 		s.events = nil
+		s.started = false
 		s.state = Idle
 		s.mu.Unlock()
 		s.opMu.Unlock()
@@ -294,6 +303,7 @@ func (s *Session) Continue(input string) (Result, error) {
 			if s.inner == inner {
 				s.inner = nil
 				s.events = nil
+				s.started = false
 			}
 			s.mu.Unlock()
 			_ = inner.Close()
@@ -343,6 +353,7 @@ func (s *Session) closeAttachment() error {
 	inner := s.inner
 	s.inner = nil
 	s.events = nil
+	s.started = false
 	s.mu.Unlock()
 	if inner != nil {
 		return inner.Close()
@@ -357,6 +368,7 @@ func (s *Session) dropAttachment() {
 	inner := s.inner
 	s.inner = nil
 	s.events = nil
+	s.started = false
 	s.mu.Unlock()
 	if inner != nil {
 		_ = inner.Close()

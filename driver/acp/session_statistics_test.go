@@ -2,10 +2,14 @@ package acp
 
 import (
 	"context"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Fullstop000/unio/driver"
 )
 
 func TestParseKimiStatisticsCurrentFormat(t *testing.T) {
@@ -60,6 +64,43 @@ func TestStatisticsParsersHonorCancellation(t *testing.T) {
 	}
 	if _, err := parseTraeXStatistics(ctx, strings.NewReader(`{"type":"event_msg"}`)); err != context.Canceled {
 		t.Fatalf("TraeX error = %v", err)
+	}
+}
+
+func TestStatisticsParsersRejectIncompleteSessionData(t *testing.T) {
+	tests := []struct {
+		name  string
+		parse func(context.Context, io.Reader) (driver.TokenUsage, error)
+		data  string
+	}{
+		{
+			name:  "Kimi partial JSONL record",
+			parse: parseKimiStatistics,
+			data:  `{"type":"usage.record"`,
+		},
+		{
+			name:  "Kimi unfinished step",
+			parse: parseKimiStatistics,
+			data:  `{"type":"context.append_loop_event","event":{"type":"step.begin","uuid":"step","turnId":1}}` + "\n",
+		},
+		{
+			name:  "TraeX partial JSONL record",
+			parse: parseTraeXStatistics,
+			data:  `{"type":"event_msg"`,
+		},
+		{
+			name:  "TraeX unfinished task",
+			parse: parseTraeXStatistics,
+			data:  `{"type":"event_msg","payload":{"type":"task_started"}}` + "\n",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := tt.parse(context.Background(), strings.NewReader(tt.data))
+			if !errors.Is(err, driver.NewProtocolError("")) {
+				t.Fatalf("error = %v; want protocol", err)
+			}
+		})
 	}
 }
 
