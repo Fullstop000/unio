@@ -106,18 +106,8 @@ func (d *Driver) ListSessions(ctx context.Context, params driver.ListSessionsPar
 	return out, nil
 }
 
-func (d *Driver) NewSessionData(context.Context, driver.AgentSpec, driver.SessionID) driver.SessionData {
-	return unsupportedSessionData{}
-}
-
-type unsupportedSessionData struct{}
-
-func (unsupportedSessionData) Raw() (driver.RawSessionData, error) {
-	return driver.RawSessionData{}, driver.NewUnsupportedError("fake: raw session data are not supported")
-}
-
-func (unsupportedSessionData) TokenStatistics() (driver.TokenUsage, error) {
-	return driver.TokenUsage{}, driver.NewUnsupportedError("fake: session token statistics are not supported")
+func (d *Driver) NewSessionData(ctx context.Context, _ driver.AgentSpec, _ driver.SessionID) driver.SessionData {
+	return driver.NewSessionData(ctx, nil, nil)
 }
 
 // OpenSession implements driver.ProtocolDriver.

@@ -19,31 +19,18 @@ type statisticsDriver struct {
 }
 
 func (d *statisticsDriver) NewSessionData(ctx context.Context, _ driver.AgentSpec, _ driver.SessionID) driver.SessionData {
-	return statisticsSessionData{ctx: ctx, raw: d.raw, usage: d.usage}
-}
-
-type statisticsSessionData struct {
-	ctx   context.Context
-	raw   driver.RawSessionData
-	usage driver.TokenUsage
-}
-
-func (d statisticsSessionData) Raw() (driver.RawSessionData, error) {
-	if err := d.ctx.Err(); err != nil {
-		return driver.RawSessionData{}, err
-	}
-	return d.raw, nil
-}
-
-func (d statisticsSessionData) TokenStatistics() (driver.TokenUsage, error) {
-	raw, err := d.Raw()
-	if err != nil {
-		return driver.TokenUsage{}, err
-	}
-	if raw.Format != d.raw.Format || string(raw.Data) != string(d.raw.Data) {
-		return driver.TokenUsage{}, driver.NewProtocolError("statistics parser did not receive raw session data")
-	}
-	return d.usage, nil
+	return driver.NewSessionData(
+		ctx,
+		func(context.Context) (driver.RawSessionData, error) {
+			return d.raw, nil
+		},
+		func(_ context.Context, raw driver.RawSessionData) (driver.TokenUsage, error) {
+			if raw.Format != d.raw.Format || string(raw.Data) != string(d.raw.Data) {
+				return driver.TokenUsage{}, driver.NewProtocolError("statistics parser did not receive raw session data")
+			}
+			return d.usage, nil
+		},
+	)
 }
 
 func newAgentWithDriver(t *testing.T, fd *fake.Driver) *Agent {

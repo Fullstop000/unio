@@ -14,17 +14,18 @@ import (
 	"github.com/Fullstop000/unio/driver"
 )
 
-type sessionData struct {
-	ctx       context.Context
-	sessionID driver.SessionID
-}
-
 func (d *Driver) NewSessionData(ctx context.Context, _ driver.AgentSpec, sessionID driver.SessionID) driver.SessionData {
-	return &sessionData{ctx: ctx, sessionID: sessionID}
+	return driver.NewSessionData(
+		ctx,
+		func(ctx context.Context) (driver.RawSessionData, error) {
+			return readCodexSessionData(ctx, sessionID)
+		},
+		parseCodexTokenStatistics,
+	)
 }
 
-func (d *sessionData) Raw() (driver.RawSessionData, error) {
-	path, err := findCodexSession(d.ctx, string(d.sessionID))
+func readCodexSessionData(ctx context.Context, sessionID driver.SessionID) (driver.RawSessionData, error) {
+	path, err := findCodexSession(ctx, string(sessionID))
 	if err != nil {
 		return driver.RawSessionData{}, err
 	}
@@ -32,7 +33,7 @@ func (d *sessionData) Raw() (driver.RawSessionData, error) {
 	if err != nil {
 		return driver.RawSessionData{}, driver.NewProtocolError("codex: read session data: " + err.Error())
 	}
-	if err := d.ctx.Err(); err != nil {
+	if err := ctx.Err(); err != nil {
 		return driver.RawSessionData{}, err
 	}
 	return driver.RawSessionData{Format: driver.SessionDataJSONL, Data: data}, nil
@@ -72,11 +73,7 @@ func findCodexSession(ctx context.Context, sessionID string) (string, error) {
 	return found, nil
 }
 
-func (d *sessionData) TokenStatistics() (driver.TokenUsage, error) {
-	raw, err := d.Raw()
-	if err != nil {
-		return driver.TokenUsage{}, err
-	}
+func parseCodexTokenStatistics(ctx context.Context, raw driver.RawSessionData) (driver.TokenUsage, error) {
 	if raw.Format != driver.SessionDataJSONL {
 		return driver.TokenUsage{}, driver.NewProtocolError("codex: unsupported session data format: " + string(raw.Format))
 	}
@@ -84,7 +81,7 @@ func (d *sessionData) TokenStatistics() (driver.TokenUsage, error) {
 	scanner := bufio.NewScanner(bytes.NewReader(raw.Data))
 	scanner.Buffer(make([]byte, 64*1024), 16*1024*1024)
 	for scanner.Scan() {
-		if err := d.ctx.Err(); err != nil {
+		if err := ctx.Err(); err != nil {
 			return driver.TokenUsage{}, err
 		}
 		var record struct {
@@ -114,5 +111,3 @@ func (d *sessionData) TokenStatistics() (driver.TokenUsage, error) {
 	}
 	return total, nil
 }
-
-var _ driver.SessionData = (*sessionData)(nil)

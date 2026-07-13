@@ -13,17 +13,18 @@ import (
 	"github.com/Fullstop000/unio/driver"
 )
 
-type sessionData struct {
-	ctx       context.Context
-	sessionID driver.SessionID
-}
-
 func (d *Driver) NewSessionData(ctx context.Context, _ driver.AgentSpec, sessionID driver.SessionID) driver.SessionData {
-	return &sessionData{ctx: ctx, sessionID: sessionID}
+	return driver.NewSessionData(
+		ctx,
+		func(ctx context.Context) (driver.RawSessionData, error) {
+			return readClaudeSessionData(ctx, sessionID)
+		},
+		parseClaudeTokenStatistics,
+	)
 }
 
-func (d *sessionData) Raw() (driver.RawSessionData, error) {
-	path, err := findClaudeSession(d.ctx, string(d.sessionID))
+func readClaudeSessionData(ctx context.Context, sessionID driver.SessionID) (driver.RawSessionData, error) {
+	path, err := findClaudeSession(ctx, string(sessionID))
 	if err != nil {
 		return driver.RawSessionData{}, err
 	}
@@ -31,7 +32,7 @@ func (d *sessionData) Raw() (driver.RawSessionData, error) {
 	if err != nil {
 		return driver.RawSessionData{}, driver.NewProtocolError("claude: read session data: " + err.Error())
 	}
-	if err := d.ctx.Err(); err != nil {
+	if err := ctx.Err(); err != nil {
 		return driver.RawSessionData{}, err
 	}
 	return driver.RawSessionData{Format: driver.SessionDataJSONL, Data: data}, nil
@@ -71,11 +72,7 @@ func findClaudeSession(ctx context.Context, sessionID string) (string, error) {
 	return found, nil
 }
 
-func (d *sessionData) TokenStatistics() (driver.TokenUsage, error) {
-	raw, err := d.Raw()
-	if err != nil {
-		return driver.TokenUsage{}, err
-	}
+func parseClaudeTokenStatistics(ctx context.Context, raw driver.RawSessionData) (driver.TokenUsage, error) {
 	if raw.Format != driver.SessionDataJSONL {
 		return driver.TokenUsage{}, driver.NewProtocolError("claude: unsupported session data format: " + string(raw.Format))
 	}
@@ -85,7 +82,7 @@ func (d *sessionData) TokenStatistics() (driver.TokenUsage, error) {
 	scanner := bufio.NewScanner(bytes.NewReader(raw.Data))
 	scanner.Buffer(make([]byte, 64*1024), 16*1024*1024)
 	for scanner.Scan() {
-		if err := d.ctx.Err(); err != nil {
+		if err := ctx.Err(); err != nil {
 			return driver.TokenUsage{}, err
 		}
 		line := scanner.Bytes()
@@ -140,5 +137,3 @@ func (d *sessionData) TokenStatistics() (driver.TokenUsage, error) {
 	}
 	return total, nil
 }
-
-var _ driver.SessionData = (*sessionData)(nil)

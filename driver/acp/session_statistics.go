@@ -15,30 +15,32 @@ import (
 	"github.com/Fullstop000/unio/driver"
 )
 
-type sessionData struct {
-	ctx       context.Context
-	runtime   string
-	sessionID driver.SessionID
-}
-
 func (d *Driver) NewSessionData(ctx context.Context, _ driver.AgentSpec, sessionID driver.SessionID) driver.SessionData {
-	return &sessionData{ctx: ctx, runtime: d.cfg.name, sessionID: sessionID}
+	runtime := d.cfg.name
+	return driver.NewSessionData(
+		ctx,
+		func(ctx context.Context) (driver.RawSessionData, error) {
+			return readACPSessionData(ctx, runtime, sessionID)
+		},
+		func(ctx context.Context, raw driver.RawSessionData) (driver.TokenUsage, error) {
+			return parseACPSessionTokenStatistics(ctx, runtime, raw)
+		},
+	)
 }
 
-func (d *sessionData) Raw() (driver.RawSessionData, error) {
-	ctx := d.ctx
+func readACPSessionData(ctx context.Context, runtime string, sessionID driver.SessionID) (driver.RawSessionData, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return driver.RawSessionData{}, driver.NewProtocolError("acp: locate home directory: " + err.Error())
 	}
 	var path string
-	switch d.runtime {
+	switch runtime {
 	case string(Kimi):
-		path, err = findKimiWire(ctx, home, string(d.sessionID))
+		path, err = findKimiWire(ctx, home, string(sessionID))
 	case string(TraeX):
-		path, err = findTraeXRollout(ctx, home, string(d.sessionID))
+		path, err = findTraeXRollout(ctx, home, string(sessionID))
 	default:
-		return driver.RawSessionData{}, driver.NewUnsupportedError("acp: raw session data are not supported by " + d.runtime)
+		return driver.RawSessionData{}, driver.NewUnsupportedError("acp: raw session data are not supported by " + runtime)
 	}
 	if err != nil {
 		return driver.RawSessionData{}, err
@@ -53,22 +55,17 @@ func (d *sessionData) Raw() (driver.RawSessionData, error) {
 	return driver.RawSessionData{Format: driver.SessionDataJSONL, Data: data}, nil
 }
 
-func (d *sessionData) TokenStatistics() (driver.TokenUsage, error) {
-	ctx := d.ctx
-	raw, err := d.Raw()
-	if err != nil {
-		return driver.TokenUsage{}, err
-	}
+func parseACPSessionTokenStatistics(ctx context.Context, runtime string, raw driver.RawSessionData) (driver.TokenUsage, error) {
 	if raw.Format != driver.SessionDataJSONL {
 		return driver.TokenUsage{}, driver.NewProtocolError("acp: unsupported session data format: " + string(raw.Format))
 	}
-	switch d.runtime {
+	switch runtime {
 	case string(Kimi):
 		return parseKimiStatistics(ctx, bytes.NewReader(raw.Data))
 	case string(TraeX):
 		return parseTraeXStatistics(ctx, bytes.NewReader(raw.Data))
 	default:
-		return driver.TokenUsage{}, driver.NewUnsupportedError("acp: session token statistics are not supported by " + d.runtime)
+		return driver.TokenUsage{}, driver.NewUnsupportedError("acp: session token statistics are not supported by " + runtime)
 	}
 }
 
@@ -279,5 +276,3 @@ func sessionScanner(input io.Reader) *bufio.Scanner {
 	scanner.Buffer(make([]byte, 64*1024), 16*1024*1024)
 	return scanner
 }
-
-var _ driver.SessionData = (*sessionData)(nil)
