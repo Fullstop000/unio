@@ -8,6 +8,13 @@ import (
 )
 
 // Session is one conversation with an Agent.
+//
+// Two locks with opposite holding disciplines. opMu serializes a whole turn
+// operation (Stream/Continue/Interrupt/*Attachment) and is held across the
+// blocking driver I/O within it. mu guards the mutable fields below and is
+// only ever held for a field snapshot or write, never across I/O, so ID and
+// State stay responsive while a turn is in flight. Lock order is always
+// opMu -> mu; functions that take only mu must not take opMu.
 type Session struct {
 	agent *Agent
 	opMu  sync.Mutex
@@ -158,13 +165,7 @@ func (s *Session) ensureAttached() error {
 		return nil
 	}
 	if err := inner.Run(nil); err != nil {
-		s.mu.Lock()
-		if s.inner == inner {
-			s.inner = nil
-			s.events = nil
-			s.started = false
-		}
-		s.mu.Unlock()
+		s.detachIfCurrent(inner)
 		_ = inner.Close()
 		return err
 	}
@@ -250,28 +251,34 @@ func (s *Session) Interrupt() error {
 // Continue supplies input requested by a blocked turn and waits for the agent
 // to complete, block again, or be interrupted.
 func (s *Session) Continue(input string) (Result, error) {
+	stream, err := s.continueStream(input)
+	if err != nil {
+		return Result{}, err
+	}
+	return stream.Result()
+}
+
+func (s *Session) continueStream(input string) (*Stream, error) {
 	s.opMu.Lock()
+	defer s.opMu.Unlock()
 	s.mu.Lock()
 	if s.agent.closed.Load() {
 		s.mu.Unlock()
-		s.opMu.Unlock()
-		return Result{}, errs.InvalidState("agent is closed")
+		return nil, errs.InvalidState("agent is closed")
 	}
 	if s.state != Blocked {
 		s.mu.Unlock()
-		s.opMu.Unlock()
-		return Result{}, errs.InvalidState("continue requires a blocked session")
+		return nil, errs.InvalidState("continue requires a blocked session")
 	}
 	inner := s.inner
 	if inner == nil || inner.ProcessState().Phase == driver.PhaseClosed {
 		s.detachLocked()
 		s.transitionLocked(Idle)
 		s.mu.Unlock()
-		s.opMu.Unlock()
 		if inner != nil {
 			_ = inner.Close()
 		}
-		return Result{}, driver.NewTransportError("agent transport closed while blocked")
+		return nil, driver.NewTransportError("agent transport closed while blocked")
 	}
 	s.transitionLocked(Running)
 	events := s.events
@@ -283,15 +290,13 @@ func (s *Session) Continue(input string) (Result, error) {
 		} else {
 			s.setState(Blocked)
 		}
-		s.opMu.Unlock()
-		return Result{}, err
+		return nil, err
 	}
 	stream := newStream(s.agent.ctx, s, events, runID)
 	s.mu.Lock()
 	s.active = stream
 	s.mu.Unlock()
-	s.opMu.Unlock()
-	return stream.Result()
+	return stream, nil
 }
 
 // transitionLocked applies a state change and its side effects. The caller

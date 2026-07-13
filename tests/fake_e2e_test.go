@@ -51,3 +51,33 @@ func TestE2E_Fake_FullLifecycle(t *testing.T) {
 func TestE2E_Fake_Cancel(t *testing.T) {
 	CancelScenario(t, fakeHarness(t))
 }
+
+// fakeBlockedHarness scripts a turn that blocks awaiting approval, then a second
+// turn that completes once Continue supplies the option. This drives the full
+// prompt -> Blocked -> Continue -> Completed path deterministically.
+func fakeBlockedHarness(t *testing.T) Harness {
+	return Harness{
+		Name: "fake",
+		NewDriver: func(t *testing.T, ctx context.Context, spec driver.AgentSpec) driver.Driver {
+			fd := fake.New(ctx, spec)
+			fd.ScriptNextSession(
+				fake.Script{Blocked: &driver.BlockedReason{
+					Kind:    driver.BlockedToolApproval,
+					Options: []driver.BlockOption{{Value: "allow_once", Label: "Allow once"}},
+				}},
+				fake.Script{
+					Items:  []driver.AgentEventItem{{Kind: driver.ItemText, Text: "resumed and done"}},
+					Result: driver.RunResult{FinishReason: driver.FinishNatural},
+				},
+			)
+			return fd
+		},
+		FirstPrompt:   "delete everything",
+		ContinueInput: "allow_once",
+		Timeout:       3 * time.Second,
+	}
+}
+
+func TestE2E_Fake_BlockedContinue(t *testing.T) {
+	BlockedScenario(t, fakeBlockedHarness(t))
+}

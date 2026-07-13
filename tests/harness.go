@@ -31,6 +31,8 @@ type Harness struct {
 	// FirstPrompt / SecondPrompt are the prompts sent across the two turns.
 	FirstPrompt  string
 	SecondPrompt string
+	// ContinueInput is the value supplied to Continue in BlockedScenario.
+	ContinueInput string
 	// Timeout bounds each wait for a terminal event.
 	Timeout time.Duration
 }
@@ -170,4 +172,80 @@ func CancelScenario(t *testing.T, h Harness) {
 	if err := att.Session.Interrupt(); err != nil {
 		t.Fatalf("[%s] interrupt(idle): %v", h.Name, err)
 	}
+}
+
+// collectUntilBlockedOrDone drains events until a Blocked, Completed, or Failed
+// for runID is seen (or the timeout fires), returning every event observed.
+func collectUntilBlockedOrDone(t *testing.T, ch <-chan driver.AgentEvent, runID driver.RunID, timeout time.Duration) []driver.AgentEvent {
+	t.Helper()
+	var out []driver.AgentEvent
+	deadline := time.After(timeout)
+	for {
+		select {
+		case ev, ok := <-ch:
+			if !ok {
+				return out
+			}
+			out = append(out, ev)
+			if ev.RunID == runID && (ev.Type == driver.EventBlocked || ev.Type == driver.EventCompleted || ev.Type == driver.EventFailed) {
+				return out
+			}
+		case <-deadline:
+			t.Fatalf("[%s] timed out waiting for blocked/terminal event of run %s", t.Name(), runID)
+			return out
+		}
+	}
+}
+
+// BlockedScenario drives a turn that blocks awaiting external input, supplies it
+// via Continue, and asserts the resumed turn runs to completion. It is only
+// meaningful for drivers that can be made to block deterministically (the fake);
+// real agents cannot be reliably scripted to request approval.
+func BlockedScenario(t *testing.T, h Harness) {
+	if h.Timeout == 0 {
+		h.Timeout = 10 * time.Second
+	}
+	if h.ContinueInput == "" {
+		t.Fatalf("[%s] BlockedScenario requires Harness.ContinueInput", h.Name)
+	}
+	ctx := context.Background()
+	d := h.NewDriver(t, ctx, h.Spec)
+
+	att, err := d.OpenSession(driver.OpenParams{Cwd: h.Spec.Cwd})
+	if err != nil {
+		t.Fatalf("[%s] open: %v", h.Name, err)
+	}
+	events := att.Events.Subscribe()
+	if err := att.Session.Run(nil); err != nil {
+		t.Fatalf("[%s] run: %v", h.Name, err)
+	}
+	defer att.Session.Close()
+
+	runID, err := att.Session.Prompt(driver.PromptReq{Text: h.FirstPrompt})
+	if err != nil {
+		t.Fatalf("[%s] prompt: %v", h.Name, err)
+	}
+	evs := collectUntilBlockedOrDone(t, events, runID, h.Timeout)
+	var blocked *driver.AgentEvent
+	for i := range evs {
+		if evs[i].Type == driver.EventBlocked && evs[i].RunID == runID {
+			blocked = &evs[i]
+		}
+	}
+	if blocked == nil {
+		t.Fatalf("[%s] first turn never blocked; events=%+v", h.Name, evs)
+	}
+	if blocked.Blocked == nil {
+		t.Fatalf("[%s] blocked event carried no reason", h.Name)
+	}
+	if state := att.Session.ProcessState().Phase; state != driver.PhaseBlocked {
+		t.Fatalf("[%s] phase after block = %q; want blocked", h.Name, state)
+	}
+
+	resumeRun, err := att.Session.Continue(h.ContinueInput)
+	if err != nil {
+		t.Fatalf("[%s] continue: %v", h.Name, err)
+	}
+	resumeEvs := collectUntil(t, events, resumeRun, h.Timeout)
+	assertProducedOutputAndCompleted(t, h.Name, resumeEvs, resumeRun)
 }
