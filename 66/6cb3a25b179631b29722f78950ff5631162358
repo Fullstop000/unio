@@ -1,0 +1,23 @@
+internal/cmd/gensupport/main.go
+  s_603ee6dacfd6ff::t_3bcad9638a2c75 4,12-14,20
+tests/support_matrix_e2e_test.go
+  s_603ee6dacfd6ff::t_84d4880d8cadbc 1-57
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "666cb3a25b179631b29722f78950ff5631162358",
+  "prompts": {},
+  "sessions": {
+    "s_603ee6dacfd6ff": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4b1f-b12a-75c1-af02-0c3edd4900ad",
+        "model": "unknown"
+      },
+      "human_author": "Fullstop000 <fullstop1005@gmail.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
