@@ -1,0 +1,63 @@
+session.go
+  s_344e8dfb10c0ce::t_24dea11f4804fb 318-330,334-341 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a54a9710b81ddefb8c8116e","tool_type":"agent","tool_id":"Edit","line_ranges":[{"Range":[318,330]},{"Range":[334,341]}]}]}
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ef09dc6d1521c902672a42947d434e09bb6cc070",
+  "prompts": {},
+  "sessions": {
+    "s_344e8dfb10c0ce": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6a4f94b50b81ddefb8c810b9",
+        "model": "openrouter-3o__max"
+      },
+      "human_author": "Fullstop000 <fullstop1005@gmail.com>"
+    }
+  },
+  "attestation_metadata": {
+    "session.go": [
+      {
+        "hash": "s_344e8dfb10c0ce::t_24dea11f4804fb",
+        "line_ranges": [
+          {
+            "Range": [
+              318,
+              330
+            ]
+          },
+          {
+            "Range": [
+              334,
+              341
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a54a9710b81ddefb8c8116e",
+            "tool_type": "agent",
+            "tool_id": "Edit",
+            "line_ranges": [
+              {
+                "Range": [
+                  318,
+                  330
+                ]
+              },
+              {
+                "Range": [
+                  334,
+                  341
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "remote_transcripts": {}
+}
