@@ -1,0 +1,47 @@
+driver/acp/driver.go
+  s_603ee6dacfd6ff::t_530a2be7dc4f92 13-14,23-24,27-28,31-32,39-41,67-68,80,104-108
+driver/acp/session_statistics.go
+  s_603ee6dacfd6ff::t_97841a89d3d25e 18-19,22-23,27
+driver/claude/driver.go
+  s_603ee6dacfd6ff::t_e26caf2717bedb 16-17,22-23,28-29,35-39,46-47,52-56,70,84,133,165-166,207,216,258-259,303,309-310,375-376,389,447,464,471
+driver/claude/session_data.go
+  s_603ee6dacfd6ff::t_9602dfdc310ff0 16-17,20-21,25
+driver/codex/session_data.go
+  s_603ee6dacfd6ff::t_e3b1b992ffda07 17-18,21-22,26
+driver/codex/session_events.go
+  s_603ee6dacfd6ff::t_18d35c77d09188 69,85,99,106
+driver/driver_test.go
+  s_603ee6dacfd6ff::t_b52ea484d55bcb 24,39,55,69,79,103,225
+driver/fake/concurrency_test.go
+  s_603ee6dacfd6ff::t_e193b3b7a3c8cd 16-17,27,37-38,45,53-54,56,58,62,66,72
+driver/fake/fake.go
+  s_603ee6dacfd6ff::t_03369b8f185492 34-35,39,46,48,76-77,80,84,91,104,107-111,117,124,136-140,172,176,182,187-190,205,209,217,223,244-245,247-249,276,282,286,288,294,300-303,333-334,364-365,371
+driver/fake/fake_test.go
+  s_603ee6dacfd6ff::t_20b60a7c1b84ec 31-32,43,49,59,98,107,109,114,123-124,126,128-129,144-145,147,149,155-156,161,164,170-171,181,183-184,190,199-201,203-205,232,235,246-247,255
+examples/basic/main.go
+  s_603ee6dacfd6ff::t_a4692e735b1b81 20,25,29
+examples/multi/main.go
+  s_603ee6dacfd6ff::t_12ef0dcce3b949 44,50,55
+examples/sessions/main.go
+  s_603ee6dacfd6ff::t_83393ca568bb6f 14,20,31
+facade.go
+  s_603ee6dacfd6ff::t_5ac92199405a5a 5,183-196,199,201,206
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "4edff8979046da945125ec30883bc756376fa1c5",
+  "prompts": {},
+  "sessions": {
+    "s_603ee6dacfd6ff": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4b1f-b12a-75c1-af02-0c3edd4900ad",
+        "model": "unknown"
+      },
+      "human_author": "Fullstop000 <fullstop1005@gmail.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
