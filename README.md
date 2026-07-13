@@ -113,6 +113,14 @@ go test -tags e2e_real ./tests/...
 
 Real E2E tests invoke authenticated CLIs and may consume tokens.
 
+## Generate
+
+```sh
+go generate ./...
+```
+
+See [docs/GENERATION.md](docs/GENERATION.md) for the generation flow.
+
 ## License
 
 MIT

@@ -1,3 +1,3 @@
 package unio
 
-//go:generate go run ./internal/cmd/gensupport
+//go:generate ./scripts/generate-support-matrix.sh

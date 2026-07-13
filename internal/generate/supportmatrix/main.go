@@ -1,3 +1,4 @@
+// Package main generates the checked-in Agent API support matrix.
 package main
 
 import (
