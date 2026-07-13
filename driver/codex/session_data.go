@@ -14,7 +14,7 @@ import (
 	"github.com/Fullstop000/unio/driver"
 )
 
-func (d *Driver) NewSessionData(ctx context.Context, _ driver.AgentSpec, sessionID driver.SessionID) driver.SessionData {
+func (d *Driver) NewSessionData(ctx context.Context, _ driver.AgentSpec, sessionID driver.SessionID) *driver.SessionData {
 	return driver.NewSessionData(
 		ctx,
 		func(ctx context.Context) (driver.RawSessionData, error) {

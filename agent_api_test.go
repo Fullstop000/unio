@@ -18,7 +18,7 @@ type statisticsDriver struct {
 	usage driver.TokenUsage
 }
 
-func (d *statisticsDriver) NewSessionData(ctx context.Context, _ driver.AgentSpec, _ driver.SessionID) driver.SessionData {
+func (d *statisticsDriver) NewSessionData(ctx context.Context, _ driver.AgentSpec, _ driver.SessionID) *driver.SessionData {
 	return driver.NewSessionData(
 		ctx,
 		func(context.Context) (driver.RawSessionData, error) {

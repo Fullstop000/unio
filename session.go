@@ -55,7 +55,7 @@ func (s *Session) Raw(ctx context.Context) (RawSessionData, error) {
 	return data.Raw()
 }
 
-func (s *Session) sessionData(ctx context.Context) (driver.SessionData, error) {
+func (s *Session) sessionData(ctx context.Context) (*driver.SessionData, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}

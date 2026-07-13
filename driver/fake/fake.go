@@ -106,7 +106,7 @@ func (d *Driver) ListSessions(ctx context.Context, params driver.ListSessionsPar
 	return out, nil
 }
 
-func (d *Driver) NewSessionData(ctx context.Context, _ driver.AgentSpec, _ driver.SessionID) driver.SessionData {
+func (d *Driver) NewSessionData(ctx context.Context, _ driver.AgentSpec, _ driver.SessionID) *driver.SessionData {
 	return driver.NewSessionData(ctx, nil, nil)
 }
 

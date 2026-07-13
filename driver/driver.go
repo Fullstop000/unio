@@ -309,7 +309,7 @@ type ProtocolDriver interface {
 
 	// NewSessionData creates an accessor for one runtime-owned persisted
 	// session. Unsupported accessors return unsupported from their methods.
-	NewSessionData(ctx context.Context, spec AgentSpec, sessionID SessionID) SessionData
+	NewSessionData(ctx context.Context, spec AgentSpec, sessionID SessionID) *SessionData
 
 	// OpenSession opens a session for the given key. The returned Session is in
 	// PhaseIdle; the caller must invoke Session.Run to bring it online.
@@ -326,13 +326,6 @@ const SessionDataJSONL SessionDataFormat = "jsonl"
 type RawSessionData struct {
 	Format SessionDataFormat
 	Data   []byte
-}
-
-// SessionData reads and interprets one runtime-owned persisted session.
-// TokenStatistics must derive its result from Raw.
-type SessionData interface {
-	Raw() (RawSessionData, error)
-	TokenStatistics() (TokenUsage, error)
 }
 
 // Session is a per-session lifecycle handle representing one conversation with a

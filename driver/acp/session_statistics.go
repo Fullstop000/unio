@@ -15,7 +15,7 @@ import (
 	"github.com/Fullstop000/unio/driver"
 )
 
-func (d *Driver) NewSessionData(ctx context.Context, _ driver.AgentSpec, sessionID driver.SessionID) driver.SessionData {
+func (d *Driver) NewSessionData(ctx context.Context, _ driver.AgentSpec, sessionID driver.SessionID) *driver.SessionData {
 	runtime := d.cfg.name
 	return driver.NewSessionData(
 		ctx,

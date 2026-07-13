@@ -2,7 +2,9 @@ package driver
 
 import "context"
 
-type sessionData struct {
+// SessionData reads and interprets one runtime-owned persisted session.
+// TokenStatistics derives its result from Raw.
+type SessionData struct {
 	ctx   context.Context
 	load  func(context.Context) (RawSessionData, error)
 	parse func(context.Context, RawSessionData) (TokenUsage, error)
@@ -15,11 +17,11 @@ func NewSessionData(
 	ctx context.Context,
 	load func(context.Context) (RawSessionData, error),
 	parse func(context.Context, RawSessionData) (TokenUsage, error),
-) SessionData {
-	return &sessionData{ctx: ctx, load: load, parse: parse}
+) *SessionData {
+	return &SessionData{ctx: ctx, load: load, parse: parse}
 }
 
-func (d *sessionData) Raw() (RawSessionData, error) {
+func (d *SessionData) Raw() (RawSessionData, error) {
 	if err := d.ctx.Err(); err != nil {
 		return RawSessionData{}, err
 	}
@@ -29,7 +31,7 @@ func (d *sessionData) Raw() (RawSessionData, error) {
 	return d.load(d.ctx)
 }
 
-func (d *sessionData) TokenStatistics() (TokenUsage, error) {
+func (d *SessionData) TokenStatistics() (TokenUsage, error) {
 	if d.parse == nil {
 		return TokenUsage{}, NewUnsupportedError("session token statistics are not supported")
 	}
