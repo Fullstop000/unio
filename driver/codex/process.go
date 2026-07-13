@@ -92,9 +92,7 @@ type pending struct {
 	ch     chan AppServerEvent
 }
 
-// process is the shared codex app-server child that multiplexes many threads
-// (sessions). It implements driver.AgentProcess so a Registry can cache one per
-// agent key and evict it when the child dies.
+// process is the shared codex app-server child that multiplexes many sessions.
 type process struct {
 	execPath string
 	spec     driver.AgentSpec

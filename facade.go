@@ -2,10 +2,10 @@
 package unio
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
-	"sync/atomic"
 	"time"
 
 	"github.com/Fullstop000/unio/driver"
@@ -88,6 +88,24 @@ type Result struct {
 	Blocked     *BlockedReason
 }
 
+// TokenStatistics is cumulative token usage read from persisted session data.
+// It is independent of Result.Usage, which describes one turn only.
+type TokenStatistics struct {
+	InputTokens      int64
+	OutputTokens     int64
+	CacheReadTokens  int64
+	CacheWriteTokens int64
+	CostUSD          float64
+}
+
+// SessionDataFormat identifies a raw persisted session representation.
+type SessionDataFormat = driver.SessionDataFormat
+
+const SessionDataJSONL = driver.SessionDataJSONL
+
+// RawSessionData is the runtime-owned persisted representation of one session.
+type RawSessionData = driver.RawSessionData
+
 // SessionInfo is persisted conversation metadata returned by ListSessions.
 type SessionInfo struct {
 	ID           string
@@ -162,26 +180,30 @@ func WithEnv(env ...string) Option {
 	return func(c *config) { c.env = append(c.env, env...) }
 }
 
-var sessionSeq atomic.Uint64
+var driverOverride func(context.Context, AgentKind, driver.AgentSpec) (driver.Driver, bool)
 
-var driverOverride func(AgentKind) (driver.ProtocolDriver, bool)
-
-var driverFactories = map[AgentKind]func() driver.ProtocolDriver{
-	Claude:   func() driver.ProtocolDriver { return claudedrv.New() },
-	Codex:    func() driver.ProtocolDriver { return codexdrv.New() },
-	Kimi:     func() driver.ProtocolDriver { return acpdrv.New(acpdrv.Kimi) },
-	TraeX:    func() driver.ProtocolDriver { return acpdrv.New(acpdrv.TraeX) },
-	OpenCode: func() driver.ProtocolDriver { return acpdrv.New(acpdrv.OpenCode) },
+var driverFactories = map[AgentKind]func(context.Context, driver.AgentSpec) driver.Driver{
+	Claude: func(ctx context.Context, spec driver.AgentSpec) driver.Driver { return claudedrv.New(ctx, spec) },
+	Codex:  func(ctx context.Context, spec driver.AgentSpec) driver.Driver { return codexdrv.New(ctx, spec) },
+	Kimi: func(ctx context.Context, spec driver.AgentSpec) driver.Driver {
+		return acpdrv.New(ctx, acpdrv.Kimi, spec)
+	},
+	TraeX: func(ctx context.Context, spec driver.AgentSpec) driver.Driver {
+		return acpdrv.New(ctx, acpdrv.TraeX, spec)
+	},
+	OpenCode: func(ctx context.Context, spec driver.AgentSpec) driver.Driver {
+		return acpdrv.New(ctx, acpdrv.OpenCode, spec)
+	},
 }
 
-func driverFor(kind AgentKind) (driver.ProtocolDriver, error) {
+func driverFor(ctx context.Context, kind AgentKind, spec driver.AgentSpec) (driver.Driver, error) {
 	if driverOverride != nil {
-		if d, ok := driverOverride(kind); ok {
+		if d, ok := driverOverride(ctx, kind, spec); ok {
 			return d, nil
 		}
 	}
 	if factory := driverFactories[kind]; factory != nil {
-		return factory(), nil
+		return factory(ctx, spec), nil
 	}
 	return nil, fmt.Errorf("unio: unknown agent %q", kind)
 }
@@ -221,10 +243,6 @@ func (c config) spec() driver.AgentSpec {
 		Cwd: cwd, Model: c.model, SystemPrompt: c.systemPrompt,
 		ExtraArgs: c.extraArgs, Env: c.env,
 	}
-}
-
-func autoKey(kind AgentKind) driver.SessionKey {
-	return fmt.Sprintf("%s-%d", kind, sessionSeq.Add(1))
 }
 
 func cwdOrDot() string {

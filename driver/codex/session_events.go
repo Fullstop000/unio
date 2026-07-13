@@ -66,7 +66,7 @@ func (s *session) finishTurn(run driver.RunID, ev AppServerEvent) {
 
 	switch ev.TurnStatus {
 	case TurnFailedStatus:
-		s.bus.Emit(driver.FailedEvent(s.key, threadID, run, driver.NewRuntimeReportedError(ev.TurnFailMsg)))
+		s.bus.Emit(driver.FailedEvent(threadID, run, driver.NewRuntimeReportedError(ev.TurnFailMsg)))
 	default:
 		finish := driver.FinishNatural
 		if ev.TurnStatus == TurnInterrupted {
@@ -82,7 +82,7 @@ func (s *session) finishTurn(run driver.RunID, ev AppServerEvent) {
 				},
 			}
 		}
-		s.bus.Emit(driver.CompletedEvent(s.key, threadID, run, result))
+		s.bus.Emit(driver.CompletedEvent(threadID, run, result))
 	}
 	s.pendingUsage.Store(nil)
 	s.curRun.Store(ptr(""))
@@ -96,14 +96,14 @@ func (s *session) onTransportClosed() {
 	s.transportClosed.Store(true)
 	run := s.currentRun()
 	if run != "" {
-		s.bus.Emit(driver.CompletedEvent(s.key, s.SessionID(), run, driver.RunResult{FinishReason: driver.FinishTransportClosed}))
+		s.bus.Emit(driver.CompletedEvent(s.SessionID(), run, driver.RunResult{FinishReason: driver.FinishTransportClosed}))
 		s.curRun.Store(ptr(""))
 	}
 	s.setState(driver.ProcessState{Phase: driver.PhaseClosed, SessionID: s.SessionID()})
 }
 
 func (s *session) emit(run driver.RunID, item driver.AgentEventItem) {
-	s.bus.Emit(driver.OutputEvent(s.key, s.SessionID(), run, item))
+	s.bus.Emit(driver.OutputEvent(s.SessionID(), run, item))
 }
 
 func ptr[T any](v T) *T { return &v }

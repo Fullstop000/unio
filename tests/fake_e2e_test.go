@@ -1,6 +1,7 @@
 package tests
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -14,11 +15,10 @@ import (
 func fakeHarness(t *testing.T) Harness {
 	return Harness{
 		Name: "fake",
-		NewDriver: func(t *testing.T) driver.ProtocolDriver {
-			fd := fake.New()
-			// Both the initial session and the resumed session live under the
-			// same key; script two turns of output.
-			key := driver.SessionKey("e2e-sess")
+		NewDriver: func(t *testing.T, ctx context.Context, spec driver.AgentSpec) driver.Driver {
+			fd := fake.New(ctx, spec)
+			// Queue one scripted turn for the initial session and one for its
+			// resumed handle.
 			turn := fake.Script{
 				Items: []driver.AgentEventItem{
 					{Kind: driver.ItemThinking, Text: "planning"},
@@ -34,7 +34,8 @@ func fakeHarness(t *testing.T) Harness {
 			}
 			// Two open() calls happen (initial + resume), each replays from
 			// scriptIdx 0, so two turns of script cover both.
-			fd.ScriptSession(key, turn, turn)
+			fd.ScriptNextSession(turn)
+			fd.ScriptNextSession(turn)
 			return fd
 		},
 		FirstPrompt:  "refactor the auth module",

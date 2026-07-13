@@ -20,16 +20,18 @@ import (
 
 // Real Claude E2E proves Agent -> Session -> Run drives a live CLI end to end.
 func TestReal_Claude_Run(t *testing.T) {
-	agent, err := unio.New(unio.Claude)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	agent, err := unio.New(ctx, unio.Claude)
 	if err != nil {
 		t.Skip("claude CLI not installed; skipping real E2E")
 	}
 	defer agent.Close()
-	session, err := agent.NewSession(context.Background())
+	session, err := agent.NewSession()
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := session.Run(context.Background(), "Reply with exactly one word: ping")
+	res, err := session.Run("Reply with exactly one word: ping")
 	if err != nil {
 		skipClaudeEnvError(t, err)
 		t.Fatalf("run: %v", err)
@@ -44,21 +46,39 @@ func TestReal_Claude_Run(t *testing.T) {
 	for model, u := range res.Usage {
 		t.Logf("usage[%s]: in=%d out=%d cost=$%.4f", model, u.InputTokens, u.OutputTokens, u.CostUSD)
 	}
+	raw, err := session.Raw()
+	if err != nil || raw.Format != unio.SessionDataJSONL || len(raw.Data) == 0 {
+		t.Fatalf("raw session data: format=%q bytes=%d error=%v", raw.Format, len(raw.Data), err)
+	}
+	var stats unio.TokenStatistics
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		stats, err = session.TokenStatistics()
+		if err == nil && stats.InputTokens > 0 && stats.OutputTokens > 0 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if err != nil || stats.InputTokens == 0 || stats.OutputTokens == 0 {
+		t.Fatalf("session token statistics = %+v, error = %v", stats, err)
+	}
 }
 
 // Real Claude streaming via the facade Stream handle.
 func TestReal_Claude_Stream(t *testing.T) {
-	agent, err := unio.New(unio.Claude)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	agent, err := unio.New(ctx, unio.Claude)
 	if err != nil {
 		t.Skip("claude CLI not installed; skipping real E2E")
 	}
 	defer agent.Close()
-	s, err := agent.NewSession(context.Background())
+	s, err := agent.NewSession()
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
 	var text strings.Builder
-	st, err := s.Stream(context.Background(), "Reply with exactly one word: ping")
+	st, err := s.Stream("Reply with exactly one word: ping")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,16 +102,16 @@ func TestReal_Claude_Stream(t *testing.T) {
 func TestReal_Claude_InterruptAndRecover(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	agent, err := unio.New(unio.Claude)
+	agent, err := unio.New(ctx, unio.Claude)
 	if err != nil {
 		t.Skip("claude CLI not installed; skipping real E2E")
 	}
 	defer agent.Close()
-	session, err := agent.NewSession(ctx)
+	session, err := agent.NewSession()
 	if err != nil {
 		t.Fatal(err)
 	}
-	stream, err := session.Stream(ctx, "Write the integers from 1 through 5000, separated by spaces.")
+	stream, err := session.Stream("Write the integers from 1 through 5000, separated by spaces.")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +122,7 @@ func TestReal_Claude_InterruptAndRecover(t *testing.T) {
 		skipClaudeEnvError(t, resultErr)
 		t.Fatalf("long turn ended before interruption: %v", resultErr)
 	}
-	if err := session.Interrupt(ctx); err != nil {
+	if err := session.Interrupt(); err != nil {
 		t.Fatal(err)
 	}
 	interrupted, err := stream.Result()
@@ -121,16 +141,16 @@ func TestReal_Claude_InterruptAndRecover(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	recoveringAgent, err := unio.New(unio.Claude)
+	recoveringAgent, err := unio.New(ctx, unio.Claude)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer recoveringAgent.Close()
-	recovered, err := recoveringAgent.GetSession(ctx, id)
+	recovered, err := recoveringAgent.GetSession(id)
 	if err != nil {
 		t.Fatalf("GetSession(%q): %v", id, err)
 	}
-	result, err := recovered.Run(ctx, "Reply with exactly one word: recovered")
+	result, err := recovered.Run("Reply with exactly one word: recovered")
 	if err != nil {
 		skipClaudeEnvError(t, err)
 		t.Fatalf("run recovered session: %v", err)

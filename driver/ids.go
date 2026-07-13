@@ -6,14 +6,6 @@ import (
 	"github.com/google/uuid"
 )
 
-// SessionKey is the host-facing identity of a session: a caller-chosen id that
-// is stable for the lifetime of the logical session (survives process restarts
-// and resumes). It is a plain string — the SDK does not impose any grouping
-// concept (workspaces, projects, …); a host that needs grouping keeps its own
-// mapping. It is distinct from SessionID, the *runtime-owned* native id which
-// may change on resume.
-type SessionKey = string
-
 // AgentKey is the cache key for an AgentProcess within a Registry. Typically the
 // host's agent UUID (as a string); string-typed so it works directly as a map
 // key and travels through logs without allocation.

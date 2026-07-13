@@ -4,24 +4,94 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/Fullstop000/unio/driver"
+	acpdrv "github.com/Fullstop000/unio/driver/acp"
 	"github.com/Fullstop000/unio/driver/fake"
 	"github.com/Fullstop000/unio/errs"
 )
+
+type statisticsDriver struct {
+	*fake.Driver
+	raw   driver.RawSessionData
+	usage driver.TokenUsage
+}
+
+func (d *statisticsDriver) OpenSession(params driver.OpenParams) (*driver.SessionAttachment, error) {
+	attachment, err := d.Driver.OpenSession(params)
+	if err != nil {
+		return nil, err
+	}
+	attachment.Session = &statisticsSession{Session: attachment.Session, raw: d.raw, usage: d.usage}
+	return attachment, nil
+}
+
+type statisticsSession struct {
+	driver.Session
+	raw   driver.RawSessionData
+	usage driver.TokenUsage
+}
+
+type nonActiveStateDriver struct {
+	*fake.Driver
+	runCalls atomic.Uint64
+}
+
+func (d *nonActiveStateDriver) OpenSession(params driver.OpenParams) (*driver.SessionAttachment, error) {
+	attachment, err := d.Driver.OpenSession(params)
+	if err != nil {
+		return nil, err
+	}
+	attachment.Session = &nonActiveStateSession{Session: attachment.Session, runCalls: &d.runCalls}
+	return attachment, nil
+}
+
+type nonActiveStateSession struct {
+	driver.Session
+	runCalls *atomic.Uint64
+}
+
+func (s *nonActiveStateSession) Run(prompt *driver.PromptReq) error {
+	s.runCalls.Add(1)
+	return s.Session.Run(prompt)
+}
+
+func (s *nonActiveStateSession) ProcessState() driver.ProcessState {
+	state := s.Session.ProcessState()
+	if state.Phase == driver.PhaseActive {
+		state.Phase = driver.PhasePromptInFlight
+	}
+	return state
+}
+
+func (s *statisticsSession) Raw() (driver.RawSessionData, error) {
+	return s.raw, nil
+}
+
+func (s *statisticsSession) TokenStatistics() (driver.TokenUsage, error) {
+	raw, err := s.Raw()
+	if err != nil {
+		return driver.TokenUsage{}, err
+	}
+	if raw.Format != s.raw.Format || string(raw.Data) != string(s.raw.Data) {
+		return driver.TokenUsage{}, driver.NewProtocolError("statistics parser did not receive raw session data")
+	}
+	return s.usage, nil
+}
 
 func newAgentWithDriver(t *testing.T, fd *fake.Driver) *Agent {
 	return newAgentWithDriverOptions(t, fd)
 }
 
-func newAgentWithDriverOptions(t *testing.T, fd *fake.Driver, opts ...Option) *Agent {
+func newAgentWithDriverOptions(t *testing.T, d driver.Driver, opts ...Option) *Agent {
 	t.Helper()
 	prev := driverOverride
-	driverOverride = func(AgentKind) (driver.ProtocolDriver, bool) { return fd, true }
+	driverOverride = func(context.Context, AgentKind, driver.AgentSpec) (driver.Driver, bool) { return d, true }
 	t.Cleanup(func() { driverOverride = prev })
-	agent, err := New(Claude, opts...)
+	agent, err := New(context.Background(), Claude, opts...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,12 +101,12 @@ func newAgentWithDriverOptions(t *testing.T, fd *fake.Driver, opts ...Option) *A
 
 func newFakeAgent(t *testing.T) *Agent {
 	t.Helper()
-	return newAgentWithDriver(t, fake.New())
+	return newAgentWithDriver(t, fake.New(context.Background(), driver.AgentSpec{}))
 }
 
 func TestNewSessionStartsIdleWithoutRuntimeID(t *testing.T) {
 	agent := newFakeAgent(t)
-	session, err := agent.NewSession(context.Background())
+	session, err := agent.NewSession()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,8 +117,8 @@ func TestNewSessionStartsIdleWithoutRuntimeID(t *testing.T) {
 
 func TestRunSetsRuntimeIDAndReturnsToIdle(t *testing.T) {
 	agent := newFakeAgent(t)
-	session, _ := agent.NewSession(context.Background())
-	result, err := session.Run(context.Background(), "hello")
+	session, _ := agent.NewSession()
+	result, err := session.Run("hello")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,19 +127,36 @@ func TestRunSetsRuntimeIDAndReturnsToIdle(t *testing.T) {
 	}
 }
 
-func TestStreamSubmissionErrorIsDirect(t *testing.T) {
-	agent := newFakeAgent(t)
-	session, _ := agent.NewSession(context.Background())
-	gate := make(chan struct{})
-	agent.driver.(*fake.Driver).ScriptSession(session.key, fake.Script{Wait: gate})
-	stream, err := session.Stream(context.Background(), "one")
+func TestRunDoesNotRestartAnAttachedSession(t *testing.T) {
+	fd := &nonActiveStateDriver{Driver: fake.New(context.Background(), driver.AgentSpec{})}
+	agent := newAgentWithDriverOptions(t, fd)
+	session, err := agent.NewSession()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := session.Stream(context.Background(), "two"); !errors.Is(err, ErrInvalidState) {
+	for _, prompt := range []string{"one", "two"} {
+		if _, err := session.Run(prompt); err != nil {
+			t.Fatalf("Run(%q): %v", prompt, err)
+		}
+	}
+	if got := fd.runCalls.Load(); got != 1 {
+		t.Fatalf("handle Run calls = %d; want 1", got)
+	}
+}
+
+func TestStreamSubmissionErrorIsDirect(t *testing.T) {
+	agent := newFakeAgent(t)
+	session, _ := agent.NewSession()
+	gate := make(chan struct{})
+	agent.driver.(*fake.Driver).ScriptNextSession(fake.Script{Wait: gate})
+	stream, err := session.Stream("one")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := session.Stream("two"); !errors.Is(err, ErrInvalidState) {
 		t.Fatalf("second Stream error = %v", err)
 	}
-	if err := session.Interrupt(context.Background()); err != nil {
+	if err := session.Interrupt(); err != nil {
 		t.Fatal(err)
 	}
 	_, _ = stream.Result()
@@ -77,12 +164,12 @@ func TestStreamSubmissionErrorIsDirect(t *testing.T) {
 }
 
 func TestNewReportsUnavailableAgent(t *testing.T) {
-	fd := fake.New()
-	fd.SetProbe(driver.RuntimeProbe{Auth: driver.AuthNotInstalled, Transport: driver.TransportFake}, nil)
+	fd := fake.New(context.Background(), driver.AgentSpec{})
+	fd.SetProbe(driver.AuthNotInstalled, nil)
 	prev := driverOverride
-	driverOverride = func(AgentKind) (driver.ProtocolDriver, bool) { return fd, true }
+	driverOverride = func(context.Context, AgentKind, driver.AgentSpec) (driver.Driver, bool) { return fd, true }
 	t.Cleanup(func() { driverOverride = prev })
-	_, err := New(Claude)
+	_, err := New(context.Background(), Claude)
 	if kind, ok := errs.KindOf(err); !ok || kind != errs.KindNotInstalled {
 		t.Fatalf("error = %v; want not_installed", err)
 	}
@@ -90,98 +177,98 @@ func TestNewReportsUnavailableAgent(t *testing.T) {
 
 func TestACPAgentKindsUseTheSharedDriver(t *testing.T) {
 	for _, kind := range []AgentKind{Kimi, TraeX, OpenCode} {
-		d, err := driverFor(kind)
+		d, err := driverFor(context.Background(), kind, driver.AgentSpec{})
 		if err != nil {
 			t.Fatalf("driverFor(%q): %v", kind, err)
 		}
-		if d.Transport() != driver.TransportACPNative {
-			t.Fatalf("driverFor(%q) transport = %q", kind, d.Transport())
+		if _, ok := d.(*acpdrv.Driver); !ok {
+			t.Fatalf("driverFor(%q) = %T; want *acp.Driver", kind, d)
 		}
 	}
 }
 
 func TestListAndGetSessionMaintainsIdentity(t *testing.T) {
-	fd := fake.New()
+	fd := fake.New(context.Background(), driver.AgentSpec{})
 	fd.SetStoredSessions([]driver.StoredSessionMeta{{SessionID: "stored-1", Title: "auth", Cwd: "/repo"}})
 	agent := newAgentWithDriverOptions(t, fd, WithCwd("/repo"))
-	infos, err := agent.ListSessions(context.Background())
+	infos, err := agent.ListSessions()
 	if err != nil || len(infos) != 1 || infos[0].ID != "stored-1" {
 		t.Fatalf("infos=%+v err=%v", infos, err)
 	}
-	first, err := agent.GetSession(context.Background(), "stored-1")
+	first, err := agent.GetSession("stored-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := agent.GetSession(context.Background(), "stored-1")
+	second, err := agent.GetSession("stored-1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if first != second || first.ID() != "stored-1" || first.State() != Idle {
 		t.Fatal("GetSession must return the maintained idle handle")
 	}
-	result, err := first.Run(context.Background(), "continue")
+	result, err := first.Run("continue")
 	if err != nil || result.Text == "" || first.ID() != "stored-1" {
 		t.Fatalf("result=%+v id=%q err=%v", result, first.ID(), err)
 	}
 }
 
 func TestListSessionsFiltersByWorkspace(t *testing.T) {
-	fd := fake.New()
+	fd := fake.New(context.Background(), driver.AgentSpec{})
 	fd.SetStoredSessions([]driver.StoredSessionMeta{
 		{SessionID: "repo-a", Cwd: "/repo/a"},
 		{SessionID: "repo-b", Cwd: "/repo/b"},
 	})
 	agent := newAgentWithDriverOptions(t, fd, WithCwd("/repo/a"))
 
-	current, err := agent.ListSessions(context.Background())
+	current, err := agent.ListSessions()
 	if err != nil || len(current) != 1 || current[0].ID != "repo-a" {
 		t.Fatalf("current=%+v err=%v", current, err)
 	}
-	other, err := agent.ListSessions(context.Background(), SessionsIn("/repo/b"))
+	other, err := agent.ListSessions(SessionsIn("/repo/b"))
 	if err != nil || len(other) != 1 || other[0].ID != "repo-b" {
 		t.Fatalf("other=%+v err=%v", other, err)
 	}
-	all, err := agent.ListSessions(context.Background(), AllSessions())
+	all, err := agent.ListSessions(AllSessions())
 	if err != nil || len(all) != 2 {
 		t.Fatalf("all=%+v err=%v", all, err)
 	}
 }
 
 func TestListSessionsFiltersMaintainedHandles(t *testing.T) {
-	agent := newAgentWithDriverOptions(t, fake.New(), WithCwd("/repo/a"))
-	session, err := agent.NewSession(context.Background())
+	agent := newAgentWithDriverOptions(t, fake.New(context.Background(), driver.AgentSpec{}), WithCwd("/repo/a"))
+	session, err := agent.NewSession()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := session.Run(context.Background(), "hello"); err != nil {
+	if _, err := session.Run("hello"); err != nil {
 		t.Fatal(err)
 	}
 
-	current, err := agent.ListSessions(context.Background())
+	current, err := agent.ListSessions()
 	if err != nil || len(current) != 1 || current[0].Cwd != "/repo/a" {
 		t.Fatalf("current=%+v err=%v", current, err)
 	}
-	other, err := agent.ListSessions(context.Background(), SessionsIn("/repo/b"))
+	other, err := agent.ListSessions(SessionsIn("/repo/b"))
 	if err != nil || len(other) != 0 {
 		t.Fatalf("other=%+v err=%v", other, err)
 	}
 }
 
 func TestListSessionsEmptySessionsInKeepsAgentWorkspace(t *testing.T) {
-	fd := fake.New()
+	fd := fake.New(context.Background(), driver.AgentSpec{})
 	fd.SetStoredSessions([]driver.StoredSessionMeta{
 		{SessionID: "repo-a", Cwd: "/repo/a"},
 		{SessionID: "repo-b", Cwd: "/repo/b"},
 	})
 	agent := newAgentWithDriverOptions(t, fd, WithCwd("/repo/a"))
-	got, err := agent.ListSessions(context.Background(), SessionsIn(""))
+	got, err := agent.ListSessions(SessionsIn(""))
 	if err != nil || len(got) != 1 || got[0].ID != "repo-a" {
 		t.Fatalf("sessions=%+v err=%v", got, err)
 	}
 }
 
 func TestListSessionsMaxSessions(t *testing.T) {
-	fd := fake.New()
+	fd := fake.New(context.Background(), driver.AgentSpec{})
 	fd.SetStoredSessions([]driver.StoredSessionMeta{
 		{SessionID: "one", Cwd: "/repo"},
 		{SessionID: "two", Cwd: "/repo"},
@@ -189,17 +276,17 @@ func TestListSessionsMaxSessions(t *testing.T) {
 	})
 	agent := newAgentWithDriverOptions(t, fd, WithCwd("/repo"))
 
-	got, err := agent.ListSessions(context.Background(), MaxSessions(2))
+	got, err := agent.ListSessions(MaxSessions(2))
 	if err != nil || len(got) != 2 || got[0].ID != "one" || got[1].ID != "two" {
 		t.Fatalf("sessions=%+v err=%v", got, err)
 	}
 
-	all, err := agent.ListSessions(context.Background(), MaxSessions(0))
+	all, err := agent.ListSessions(MaxSessions(0))
 	if err != nil || len(all) != 3 {
 		t.Fatalf("sessions=%+v err=%v", all, err)
 	}
 
-	all, err = agent.ListSessions(context.Background(), MaxSessions(3))
+	all, err = agent.ListSessions(MaxSessions(3))
 	if err != nil || len(all) != 3 {
 		t.Fatalf("sessions=%+v err=%v", all, err)
 	}
@@ -207,47 +294,115 @@ func TestListSessionsMaxSessions(t *testing.T) {
 
 func TestGetSessionRejectsUnknownID(t *testing.T) {
 	agent := newFakeAgent(t)
-	_, err := agent.GetSession(context.Background(), "missing")
+	_, err := agent.GetSession("missing")
 	if !errors.Is(err, ErrSessionNotFound) {
 		t.Fatalf("error = %v; want session_not_found", err)
 	}
 }
 
+func TestSessionTokenStatistics(t *testing.T) {
+	fd := &statisticsDriver{Driver: fake.New(context.Background(), driver.AgentSpec{}), raw: driver.RawSessionData{
+		Format: driver.SessionDataJSONL, Data: []byte("raw data"),
+	}, usage: driver.TokenUsage{
+		InputTokens: 100, OutputTokens: 20, CacheReadTokens: 60, CacheWriteTokens: 5,
+	}}
+	fd.SetStoredSessions([]driver.StoredSessionMeta{{SessionID: "stored", Cwd: "/repo"}})
+	agent := newAgentWithDriverOptions(t, fd, WithCwd("/repo"))
+	session, err := agent.GetSession("stored")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := session.TokenStatistics()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.InputTokens != 100 || got.OutputTokens != 20 || got.CacheReadTokens != 60 || got.CacheWriteTokens != 5 {
+		t.Fatalf("statistics = %+v", got)
+	}
+	raw, err := session.Raw()
+	if err != nil || raw.Format != SessionDataJSONL || string(raw.Data) != "raw data" {
+		t.Fatalf("raw = %+v, error = %v", raw, err)
+	}
+	session.mu.Lock()
+	inner := session.inner
+	session.mu.Unlock()
+	if inner == nil {
+		t.Fatal("reading persisted data did not create a session handle")
+	}
+	if state := inner.ProcessState(); state.Phase != driver.PhaseIdle {
+		t.Fatalf("reading persisted data started runtime: state=%+v", state)
+	}
+	result, err := session.Run("continue")
+	if err != nil || result.SessionID != "stored" {
+		t.Fatalf("run after persisted data read: result=%+v error=%v", result, err)
+	}
+}
+
+func TestSessionTokenStatisticsUnsupported(t *testing.T) {
+	fd := fake.New(context.Background(), driver.AgentSpec{})
+	fd.SetStoredSessions([]driver.StoredSessionMeta{{SessionID: "stored", Cwd: "/repo"}})
+	agent := newAgentWithDriverOptions(t, fd, WithCwd("/repo"))
+	session, err := agent.GetSession("stored")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := session.TokenStatistics(); !errors.Is(err, driver.NewUnsupportedError("")) {
+		t.Fatalf("error = %v; want unsupported", err)
+	}
+	if _, err := session.Raw(); !errors.Is(err, driver.NewUnsupportedError("")) {
+		t.Fatalf("raw error = %v; want unsupported", err)
+	}
+}
+
+func TestSessionRawDataRequiresRuntimeID(t *testing.T) {
+	agent := newAgentWithDriverOptions(t, &statisticsDriver{Driver: fake.New(context.Background(), driver.AgentSpec{})})
+	session, err := agent.NewSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := session.Raw(); !errors.Is(err, ErrInvalidState) {
+		t.Fatalf("raw error = %v; want invalid_state", err)
+	}
+	if _, err := session.TokenStatistics(); !errors.Is(err, ErrInvalidState) {
+		t.Fatalf("statistics error = %v; want invalid_state", err)
+	}
+}
+
 func TestBlockedContinueReturnsToIdle(t *testing.T) {
-	fd := fake.New()
+	fd := fake.New(context.Background(), driver.AgentSpec{})
 	agent := newAgentWithDriver(t, fd)
-	session, _ := agent.NewSession(context.Background())
-	fd.ScriptSession(session.key,
+	session, _ := agent.NewSession()
+	fd.ScriptNextSession(
 		fake.Script{Blocked: &driver.BlockedReason{
 			Kind:    driver.BlockedToolApproval,
 			Options: []driver.BlockOption{{Value: "allow_once", Label: "Allow once"}},
 		}},
 		fake.Script{Items: []driver.AgentEventItem{{Kind: driver.ItemText, Text: "continued"}}},
 	)
-	blocked, err := session.Run(context.Background(), "needs approval")
+	blocked, err := session.Run("needs approval")
 	if err != nil || blocked.Blocked == nil || session.State() != Blocked {
 		t.Fatalf("result=%+v state=%q err=%v", blocked, session.State(), err)
 	}
-	continued, err := session.Continue(context.Background(), "allow_once")
+	continued, err := session.Continue("allow_once")
 	if err != nil || continued.Text != "continued" || session.State() != Idle {
 		t.Fatalf("result=%+v state=%q err=%v", continued, session.State(), err)
 	}
 }
 
 func TestInterruptReturnsPartialResult(t *testing.T) {
-	fd := fake.New()
+	fd := fake.New(context.Background(), driver.AgentSpec{})
 	agent := newAgentWithDriver(t, fd)
-	session, _ := agent.NewSession(context.Background())
+	session, _ := agent.NewSession()
 	gate := make(chan struct{})
-	fd.ScriptSession(session.key, fake.Script{
+	fd.ScriptNextSession(fake.Script{
 		Items: []driver.AgentEventItem{{Kind: driver.ItemText, Text: "partial"}},
 		Wait:  gate,
 	})
-	stream, err := session.Stream(context.Background(), "long")
+	stream, err := session.Stream("long")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := session.Interrupt(context.Background()); err != nil {
+	if err := session.Interrupt(); err != nil {
 		t.Fatal(err)
 	}
 	result, err := stream.Result()
@@ -257,27 +412,49 @@ func TestInterruptReturnsPartialResult(t *testing.T) {
 	close(gate)
 }
 
-func TestContextCancellationWaitsForInterruptConfirmation(t *testing.T) {
+func TestAgentContextCancellationStopsDerivedSession(t *testing.T) {
 	turnGate := make(chan struct{})
-	interruptGate := make(chan struct{})
-	fd := fake.New()
-	agent := newAgentWithDriver(t, fd)
-	session, _ := agent.NewSession(context.Background())
-	fd.ScriptSession(session.key, fake.Script{Wait: turnGate, InterruptWait: interruptGate})
+	parent, cancel := context.WithCancel(context.Background())
+	var driverCtx context.Context
+	var driverSpec driver.AgentSpec
+	var fd *fake.Driver
+	prev := driverOverride
+	driverOverride = func(ctx context.Context, kind AgentKind, spec driver.AgentSpec) (driver.Driver, bool) {
+		if kind != Claude {
+			t.Fatalf("driver kind = %q; want %q", kind, Claude)
+		}
+		driverCtx = ctx
+		driverSpec = spec
+		fd = fake.New(ctx, spec)
+		return fd, true
+	}
+	t.Cleanup(func() { driverOverride = prev })
+	agent, err := New(parent, Claude, WithCwd("/repo"), WithModel("model"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if driverCtx == nil {
+		t.Fatal("New did not pass the Agent lifecycle context to its driver")
+	}
+	if driverSpec.Cwd != "/repo" || driverSpec.Model != "model" {
+		t.Fatalf("driver spec = %+v", driverSpec)
+	}
+	t.Cleanup(func() { _ = agent.Close() })
+	session, _ := agent.NewSession()
+	fd.ScriptNextSession(fake.Script{Wait: turnGate})
 
-	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		_, err := session.Run(ctx, "long")
+		_, err := session.Run("long")
 		done <- err
 	}()
 	waitDriverPhase(t, session, driver.PhasePromptInFlight)
 	cancel()
-	time.Sleep(20 * time.Millisecond)
-	if session.State() != Running {
-		t.Fatalf("state changed before interrupt confirmation: %q", session.State())
+	select {
+	case <-driverCtx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("driver lifecycle context was not cancelled")
 	}
-	close(interruptGate)
 	if err := <-done; !errors.Is(err, context.Canceled) {
 		t.Fatalf("run error = %v; want context.Canceled", err)
 	}
@@ -313,25 +490,25 @@ func waitDriverPhase(t *testing.T, session *Session, want driver.Phase) {
 }
 
 type blockingOpenDriver struct {
-	driver.ProtocolDriver
+	driver.Driver
 	started chan struct{}
 	release chan struct{}
 }
 
 type blockingPromptDriver struct {
-	driver.ProtocolDriver
+	driver.Driver
 	started chan struct{}
 	release chan struct{}
 }
 
-type recordingSpecDriver struct {
-	driver.ProtocolDriver
-	mu   sync.Mutex
-	spec driver.AgentSpec
+type recordingOpenDriver struct {
+	driver.Driver
+	mu     sync.Mutex
+	params driver.OpenParams
 }
 
 type staleAttachmentDriver struct {
-	driver.ProtocolDriver
+	driver.Driver
 	mu              sync.Mutex
 	opens           int
 	failFirstPrompt bool
@@ -345,8 +522,8 @@ type staleAttachmentSession struct {
 	failPrompt bool
 }
 
-func (d *staleAttachmentDriver) OpenSession(ctx context.Context, key driver.SessionKey, spec driver.AgentSpec, params driver.OpenParams) (*driver.SessionAttachment, error) {
-	att, err := d.ProtocolDriver.OpenSession(ctx, key, spec, params)
+func (d *staleAttachmentDriver) OpenSession(params driver.OpenParams) (*driver.SessionAttachment, error) {
+	att, err := d.Driver.OpenSession(params)
 	if err != nil {
 		return nil, err
 	}
@@ -378,7 +555,7 @@ func (s *staleAttachmentSession) markStale() {
 	s.mu.Unlock()
 }
 
-func (s *staleAttachmentSession) Prompt(ctx context.Context, req driver.PromptReq) (driver.RunID, error) {
+func (s *staleAttachmentSession) Prompt(req driver.PromptReq) (driver.RunID, error) {
 	s.mu.Lock()
 	fail := s.failPrompt
 	s.failPrompt = false
@@ -389,18 +566,18 @@ func (s *staleAttachmentSession) Prompt(ctx context.Context, req driver.PromptRe
 	if fail {
 		return driver.NewRunID(), driver.NewTransportError("forced closed transport")
 	}
-	return s.Session.Prompt(ctx, req)
+	return s.Session.Prompt(req)
 }
 
-func (d *recordingSpecDriver) OpenSession(ctx context.Context, key driver.SessionKey, spec driver.AgentSpec, params driver.OpenParams) (*driver.SessionAttachment, error) {
+func (d *recordingOpenDriver) OpenSession(params driver.OpenParams) (*driver.SessionAttachment, error) {
 	d.mu.Lock()
-	d.spec = spec
+	d.params = params
 	d.mu.Unlock()
-	return d.ProtocolDriver.OpenSession(ctx, key, spec, params)
+	return d.Driver.OpenSession(params)
 }
 
-func (d *blockingPromptDriver) OpenSession(ctx context.Context, key driver.SessionKey, spec driver.AgentSpec, params driver.OpenParams) (*driver.SessionAttachment, error) {
-	att, err := d.ProtocolDriver.OpenSession(ctx, key, spec, params)
+func (d *blockingPromptDriver) OpenSession(params driver.OpenParams) (*driver.SessionAttachment, error) {
+	att, err := d.Driver.OpenSession(params)
 	if err != nil {
 		return nil, err
 	}
@@ -414,40 +591,32 @@ type blockingPromptSession struct {
 	release chan struct{}
 }
 
-func (s *blockingPromptSession) Prompt(ctx context.Context, req driver.PromptReq) (driver.RunID, error) {
+func (s *blockingPromptSession) Prompt(req driver.PromptReq) (driver.RunID, error) {
 	close(s.started)
-	select {
-	case <-s.release:
-	case <-ctx.Done():
-		return "", ctx.Err()
-	}
-	return s.Session.Prompt(ctx, req)
+	<-s.release
+	return s.Session.Prompt(req)
 }
 
-func (d *blockingOpenDriver) OpenSession(ctx context.Context, key driver.SessionKey, spec driver.AgentSpec, params driver.OpenParams) (*driver.SessionAttachment, error) {
+func (d *blockingOpenDriver) OpenSession(params driver.OpenParams) (*driver.SessionAttachment, error) {
 	close(d.started)
-	select {
-	case <-d.release:
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
-	return d.ProtocolDriver.OpenSession(ctx, key, spec, params)
+	<-d.release
+	return d.Driver.OpenSession(params)
 }
 
 func TestAgentCloseCannotRaceInANewAttachment(t *testing.T) {
-	fd := fake.New()
-	blocking := &blockingOpenDriver{ProtocolDriver: fd, started: make(chan struct{}), release: make(chan struct{})}
+	fd := fake.New(context.Background(), driver.AgentSpec{})
+	blocking := &blockingOpenDriver{Driver: fd, started: make(chan struct{}), release: make(chan struct{})}
 	prev := driverOverride
-	driverOverride = func(AgentKind) (driver.ProtocolDriver, bool) { return blocking, true }
+	driverOverride = func(context.Context, AgentKind, driver.AgentSpec) (driver.Driver, bool) { return blocking, true }
 	t.Cleanup(func() { driverOverride = prev })
-	agent, err := New(Claude)
+	agent, err := New(context.Background(), Claude)
 	if err != nil {
 		t.Fatal(err)
 	}
-	session, _ := agent.NewSession(context.Background())
+	session, _ := agent.NewSession()
 	done := make(chan error, 1)
 	go func() {
-		_, err := session.Run(context.Background(), "hello")
+		_, err := session.Run("hello")
 		done <- err
 	}()
 	<-blocking.started
@@ -472,19 +641,19 @@ func TestAgentCloseCannotRaceInANewAttachment(t *testing.T) {
 }
 
 func TestAgentCloseWaitsForPromptSubmission(t *testing.T) {
-	fd := fake.New()
-	blocking := &blockingPromptDriver{ProtocolDriver: fd, started: make(chan struct{}), release: make(chan struct{})}
+	fd := fake.New(context.Background(), driver.AgentSpec{})
+	blocking := &blockingPromptDriver{Driver: fd, started: make(chan struct{}), release: make(chan struct{})}
 	prev := driverOverride
-	driverOverride = func(AgentKind) (driver.ProtocolDriver, bool) { return blocking, true }
+	driverOverride = func(context.Context, AgentKind, driver.AgentSpec) (driver.Driver, bool) { return blocking, true }
 	t.Cleanup(func() { driverOverride = prev })
-	agent, err := New(Claude)
+	agent, err := New(context.Background(), Claude)
 	if err != nil {
 		t.Fatal(err)
 	}
-	session, _ := agent.NewSession(context.Background())
+	session, _ := agent.NewSession()
 	streamDone := make(chan error, 1)
 	go func() {
-		_, err := session.Stream(context.Background(), "hello")
+		_, err := session.Stream("hello")
 		streamDone <- err
 	}()
 	<-blocking.started
@@ -505,25 +674,25 @@ func TestAgentCloseWaitsForPromptSubmission(t *testing.T) {
 }
 
 func TestInterruptWaitsForPromptSubmission(t *testing.T) {
-	fd := fake.New()
-	blocking := &blockingPromptDriver{ProtocolDriver: fd, started: make(chan struct{}), release: make(chan struct{})}
+	fd := fake.New(context.Background(), driver.AgentSpec{})
+	blocking := &blockingPromptDriver{Driver: fd, started: make(chan struct{}), release: make(chan struct{})}
 	prev := driverOverride
-	driverOverride = func(AgentKind) (driver.ProtocolDriver, bool) { return blocking, true }
+	driverOverride = func(context.Context, AgentKind, driver.AgentSpec) (driver.Driver, bool) { return blocking, true }
 	t.Cleanup(func() { driverOverride = prev })
-	agent, err := New(Claude)
+	agent, err := New(context.Background(), Claude)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer agent.Close()
-	session, _ := agent.NewSession(context.Background())
+	session, _ := agent.NewSession()
 	streamDone := make(chan *Stream, 1)
 	go func() {
-		stream, _ := session.Stream(context.Background(), "hello")
+		stream, _ := session.Stream("hello")
 		streamDone <- stream
 	}()
 	<-blocking.started
 	interruptDone := make(chan error, 1)
-	go func() { interruptDone <- session.Interrupt(context.Background()) }()
+	go func() { interruptDone <- session.Interrupt() }()
 	var early error
 	returnedEarly := false
 	select {
@@ -549,11 +718,11 @@ func TestInterruptWaitsForPromptSubmission(t *testing.T) {
 }
 
 func TestTransportClosedTurnReturnsError(t *testing.T) {
-	fd := fake.New()
+	fd := fake.New(context.Background(), driver.AgentSpec{})
 	agent := newAgentWithDriver(t, fd)
-	session, _ := agent.NewSession(context.Background())
-	fd.ScriptSession(session.key, fake.Script{Result: driver.RunResult{FinishReason: driver.FinishTransportClosed}})
-	_, err := session.Run(context.Background(), "hello")
+	session, _ := agent.NewSession()
+	fd.ScriptNextSession(fake.Script{Result: driver.RunResult{FinishReason: driver.FinishTransportClosed}})
+	_, err := session.Run("hello")
 	if kind, ok := errs.KindOf(err); !ok || kind != errs.KindTransport {
 		t.Fatalf("error = %v; want transport", err)
 	}
@@ -561,24 +730,24 @@ func TestTransportClosedTurnReturnsError(t *testing.T) {
 
 func TestInterruptedStreamMustFinishBeforeNextTurn(t *testing.T) {
 	gate := make(chan struct{})
-	fd := fake.New()
+	fd := fake.New(context.Background(), driver.AgentSpec{})
 	agent := newAgentWithDriver(t, fd)
-	session, _ := agent.NewSession(context.Background())
-	fd.ScriptSession(session.key, fake.Script{Wait: gate})
-	first, err := session.Stream(context.Background(), "long")
+	session, _ := agent.NewSession()
+	fd.ScriptNextSession(fake.Script{Wait: gate})
+	first, err := session.Stream("long")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := session.Interrupt(context.Background()); err != nil {
+	if err := session.Interrupt(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := session.Stream(context.Background(), "too early"); !errors.Is(err, ErrInvalidState) {
+	if _, err := session.Stream("too early"); !errors.Is(err, ErrInvalidState) {
 		t.Fatalf("new turn before interrupted stream terminal = %v", err)
 	}
 	if _, err := first.Result(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := session.Run(context.Background(), "now allowed"); err != nil {
+	if _, err := session.Run("now allowed"); err != nil {
 		t.Fatal(err)
 	}
 	close(gate)
@@ -589,14 +758,14 @@ func TestListSessionsAfterAgentCloseFails(t *testing.T) {
 	if err := agent.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := agent.ListSessions(context.Background()); !errors.Is(err, ErrInvalidState) {
+	if _, err := agent.ListSessions(); !errors.Is(err, ErrInvalidState) {
 		t.Fatalf("ListSessions after Close error = %v", err)
 	}
 }
 
 func TestSessionRejectsRuntimeIDChange(t *testing.T) {
 	agent := newFakeAgent(t)
-	session, _ := agent.NewSession(context.Background())
+	session, _ := agent.NewSession()
 	if err := session.setID("original"); err != nil {
 		t.Fatal(err)
 	}
@@ -606,26 +775,26 @@ func TestSessionRejectsRuntimeIDChange(t *testing.T) {
 }
 
 func TestGetSessionUsesPersistedCwdForResume(t *testing.T) {
-	fd := fake.New()
+	fd := fake.New(context.Background(), driver.AgentSpec{})
 	fd.SetStoredSessions([]driver.StoredSessionMeta{{SessionID: "stored", Cwd: "/other/repo"}})
-	recording := &recordingSpecDriver{ProtocolDriver: fd}
+	recording := &recordingOpenDriver{Driver: fd}
 	prev := driverOverride
-	driverOverride = func(AgentKind) (driver.ProtocolDriver, bool) { return recording, true }
+	driverOverride = func(context.Context, AgentKind, driver.AgentSpec) (driver.Driver, bool) { return recording, true }
 	t.Cleanup(func() { driverOverride = prev })
-	agent, err := New(Claude, WithCwd("/default/repo"))
+	agent, err := New(context.Background(), Claude, WithCwd("/default/repo"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer agent.Close()
-	session, err := agent.GetSession(context.Background(), "stored")
+	session, err := agent.GetSession("stored")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := session.Run(context.Background(), "continue"); err != nil {
+	if _, err := session.Run("continue"); err != nil {
 		t.Fatal(err)
 	}
 	recording.mu.Lock()
-	cwd := recording.spec.Cwd
+	cwd := recording.params.Cwd
 	recording.mu.Unlock()
 	if cwd != "/other/repo" {
 		t.Fatalf("resume cwd = %q; want persisted cwd", cwd)
@@ -633,25 +802,25 @@ func TestGetSessionUsesPersistedCwdForResume(t *testing.T) {
 }
 
 func TestRunReattachesAClosedDriverSession(t *testing.T) {
-	fd := fake.New()
-	staleDriver := &staleAttachmentDriver{ProtocolDriver: fd}
+	fd := fake.New(context.Background(), driver.AgentSpec{})
+	staleDriver := &staleAttachmentDriver{Driver: fd}
 	prev := driverOverride
-	driverOverride = func(AgentKind) (driver.ProtocolDriver, bool) { return staleDriver, true }
+	driverOverride = func(context.Context, AgentKind, driver.AgentSpec) (driver.Driver, bool) { return staleDriver, true }
 	t.Cleanup(func() { driverOverride = prev })
-	agent, err := New(Codex)
+	agent, err := New(context.Background(), Codex)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer agent.Close()
-	session, _ := agent.NewSession(context.Background())
-	if _, err := session.Run(context.Background(), "first"); err != nil {
+	session, _ := agent.NewSession()
+	if _, err := session.Run("first"); err != nil {
 		t.Fatal(err)
 	}
 	staleDriver.mu.Lock()
 	first := staleDriver.latest
 	staleDriver.mu.Unlock()
 	first.markStale()
-	if _, err := session.Run(context.Background(), "second"); err != nil {
+	if _, err := session.Run("second"); err != nil {
 		t.Fatal(err)
 	}
 	staleDriver.mu.Lock()
@@ -663,52 +832,52 @@ func TestRunReattachesAClosedDriverSession(t *testing.T) {
 }
 
 func TestContinueDropsAClosedBlockedAttachment(t *testing.T) {
-	fd := fake.New()
-	staleDriver := &staleAttachmentDriver{ProtocolDriver: fd}
+	fd := fake.New(context.Background(), driver.AgentSpec{})
+	staleDriver := &staleAttachmentDriver{Driver: fd}
 	prev := driverOverride
-	driverOverride = func(AgentKind) (driver.ProtocolDriver, bool) { return staleDriver, true }
+	driverOverride = func(context.Context, AgentKind, driver.AgentSpec) (driver.Driver, bool) { return staleDriver, true }
 	t.Cleanup(func() { driverOverride = prev })
-	agent, err := New(Codex)
+	agent, err := New(context.Background(), Codex)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer agent.Close()
-	session, _ := agent.NewSession(context.Background())
-	fd.ScriptSession(session.key, fake.Script{Blocked: &driver.BlockedReason{Kind: driver.BlockedToolApproval}})
-	if result, err := session.Run(context.Background(), "block"); err != nil || result.Blocked == nil {
+	session, _ := agent.NewSession()
+	fd.ScriptNextSession(fake.Script{Blocked: &driver.BlockedReason{Kind: driver.BlockedToolApproval}})
+	if result, err := session.Run("block"); err != nil || result.Blocked == nil {
 		t.Fatalf("blocked result=%+v err=%v", result, err)
 	}
 	staleDriver.mu.Lock()
 	first := staleDriver.latest
 	staleDriver.mu.Unlock()
 	first.markStale()
-	if _, err := session.Continue(context.Background(), "allow_once"); err == nil {
+	if _, err := session.Continue("allow_once"); err == nil {
 		t.Fatal("Continue accepted a closed blocked attachment")
 	}
 	if session.State() != Idle {
 		t.Fatalf("state after stale Continue = %q; want idle", session.State())
 	}
-	if _, err := session.Run(context.Background(), "recover"); err != nil {
+	if _, err := session.Run("recover"); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestPromptErrorDropsAClosedAttachment(t *testing.T) {
-	fd := fake.New()
-	staleDriver := &staleAttachmentDriver{ProtocolDriver: fd, failFirstPrompt: true}
+	fd := fake.New(context.Background(), driver.AgentSpec{})
+	staleDriver := &staleAttachmentDriver{Driver: fd, failFirstPrompt: true}
 	prev := driverOverride
-	driverOverride = func(AgentKind) (driver.ProtocolDriver, bool) { return staleDriver, true }
+	driverOverride = func(context.Context, AgentKind, driver.AgentSpec) (driver.Driver, bool) { return staleDriver, true }
 	t.Cleanup(func() { driverOverride = prev })
-	agent, err := New(Codex)
+	agent, err := New(context.Background(), Codex)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer agent.Close()
-	session, _ := agent.NewSession(context.Background())
-	if _, err := session.Run(context.Background(), "fails"); err == nil {
+	session, _ := agent.NewSession()
+	if _, err := session.Run("fails"); err == nil {
 		t.Fatal("first Run unexpectedly succeeded")
 	}
-	if _, err := session.Run(context.Background(), "recovers"); err != nil {
+	if _, err := session.Run("recovers"); err != nil {
 		t.Fatal(err)
 	}
 	staleDriver.mu.Lock()

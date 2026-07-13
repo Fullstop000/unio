@@ -1,5 +1,5 @@
 // Package e2e holds unio's end-to-end tests: full-lifecycle scenarios that drive
-// a real ProtocolDriver through open → run → prompt → consume the event stream →
+// a real Driver through open → run → prompt → consume the event stream →
 // cancel → resume (in a fresh session) → close, asserting the SDK does something
 // genuinely useful rather than merely compiling.
 //
@@ -25,8 +25,8 @@ type Harness struct {
 	// Name labels the harness in test output.
 	Name string
 	// NewDriver returns the driver-under-test.
-	NewDriver func(t *testing.T) driver.ProtocolDriver
-	// Spec is the agent spec used to open sessions.
+	NewDriver func(t *testing.T, ctx context.Context, spec driver.AgentSpec) driver.Driver
+	// Spec is injected when the concrete driver is constructed.
 	Spec driver.AgentSpec
 	// FirstPrompt / SecondPrompt are the prompts sent across the two turns.
 	FirstPrompt  string
@@ -64,18 +64,17 @@ func RunLifecycle(t *testing.T, h Harness) {
 		h.Timeout = 10 * time.Second
 	}
 	ctx := context.Background()
-	d := h.NewDriver(t)
-	key := driver.SessionKey("e2e-sess")
+	d := h.NewDriver(t, ctx, h.Spec)
 
 	// --- open + subscribe before run (no early events missed) ---
-	att, err := d.OpenSession(ctx, key, h.Spec, driver.OpenParams{})
+	att, err := d.OpenSession(driver.OpenParams{Cwd: h.Spec.Cwd})
 	if err != nil {
 		t.Fatalf("[%s] open: %v", h.Name, err)
 	}
 	events := att.Events.Subscribe()
 
 	// --- run brings the session online and attaches a runtime session id ---
-	if err := att.Session.Run(ctx, nil); err != nil {
+	if err := att.Session.Run(nil); err != nil {
 		t.Fatalf("[%s] run: %v", h.Name, err)
 	}
 	firstID := att.Session.SessionID()
@@ -84,7 +83,7 @@ func RunLifecycle(t *testing.T, h Harness) {
 	}
 
 	// --- first prompt: consume the stream through to Completed ---
-	runID, err := att.Session.Prompt(ctx, driver.PromptReq{Text: h.FirstPrompt})
+	runID, err := att.Session.Prompt(driver.PromptReq{Text: h.FirstPrompt})
 	if err != nil {
 		t.Fatalf("[%s] prompt: %v", h.Name, err)
 	}
@@ -92,17 +91,17 @@ func RunLifecycle(t *testing.T, h Harness) {
 	assertProducedOutputAndCompleted(t, h.Name, evs, runID)
 
 	// --- close the first session ---
-	if err := att.Session.Close(ctx); err != nil {
+	if err := att.Session.Close(); err != nil {
 		t.Fatalf("[%s] close: %v", h.Name, err)
 	}
 
 	// --- resume: open a fresh session with the prior runtime id ---
-	att2, err := d.OpenSession(ctx, key, h.Spec, driver.OpenParams{ResumeSessionID: firstID})
+	att2, err := d.OpenSession(driver.OpenParams{ResumeSessionID: firstID, Cwd: h.Spec.Cwd})
 	if err != nil {
 		t.Fatalf("[%s] reopen(resume): %v", h.Name, err)
 	}
 	events2 := att2.Events.Subscribe()
-	if err := att2.Session.Run(ctx, nil); err != nil {
+	if err := att2.Session.Run(nil); err != nil {
 		t.Fatalf("[%s] run(resume): %v", h.Name, err)
 	}
 	resumedID := att2.Session.SessionID()
@@ -111,14 +110,14 @@ func RunLifecycle(t *testing.T, h Harness) {
 	}
 
 	// --- second prompt on the resumed session ---
-	runID2, err := att2.Session.Prompt(ctx, driver.PromptReq{Text: h.SecondPrompt})
+	runID2, err := att2.Session.Prompt(driver.PromptReq{Text: h.SecondPrompt})
 	if err != nil {
 		t.Fatalf("[%s] prompt(resume): %v", h.Name, err)
 	}
 	evs2 := collectUntil(t, events2, runID2, h.Timeout)
 	assertProducedOutputAndCompleted(t, h.Name, evs2, runID2)
 
-	if err := att2.Session.Close(ctx); err != nil {
+	if err := att2.Session.Close(); err != nil {
 		t.Fatalf("[%s] final close: %v", h.Name, err)
 	}
 }
@@ -156,20 +155,19 @@ func CancelScenario(t *testing.T, h Harness) {
 		h.Timeout = 10 * time.Second
 	}
 	ctx := context.Background()
-	d := h.NewDriver(t)
-	key := driver.SessionKey("e2e-cancel")
+	d := h.NewDriver(t, ctx, h.Spec)
 
-	att, err := d.OpenSession(ctx, key, h.Spec, driver.OpenParams{})
+	att, err := d.OpenSession(driver.OpenParams{Cwd: h.Spec.Cwd})
 	if err != nil {
 		t.Fatalf("[%s] open: %v", h.Name, err)
 	}
 	_ = att.Events.Subscribe()
-	if err := att.Session.Run(ctx, nil); err != nil {
+	if err := att.Session.Run(nil); err != nil {
 		t.Fatalf("[%s] run: %v", h.Name, err)
 	}
-	defer att.Session.Close(ctx)
+	defer att.Session.Close()
 
-	if err := att.Session.Interrupt(ctx); err != nil {
+	if err := att.Session.Interrupt(); err != nil {
 		t.Fatalf("[%s] interrupt(idle): %v", h.Name, err)
 	}
 }

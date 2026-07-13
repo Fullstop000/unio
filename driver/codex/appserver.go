@@ -1,4 +1,4 @@
-// Package codex implements the unio ProtocolDriver for Codex's app-server
+// Package codex implements the unio Driver for Codex's app-server
 // protocol (`codex app-server --listen stdio://`).
 //
 // Transport model: one long-lived child multiplexes many threads, and each

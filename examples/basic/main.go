@@ -17,16 +17,16 @@ import (
 func main() {
 	// The whole interaction: one call. unio handles spawn, session id,
 	// subscription, the event loop, and completion.
-	agent, err := unio.New(unio.Claude)
+	agent, err := unio.New(context.Background(), unio.Claude)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer agent.Close()
-	session, err := agent.NewSession(context.Background())
+	session, err := agent.NewSession()
 	if err != nil {
 		log.Fatal(err)
 	}
-	res, err := session.Run(context.Background(), "Reply with exactly one word: ping")
+	res, err := session.Run("Reply with exactly one word: ping")
 	if err != nil {
 		log.Fatal(err)
 	}

@@ -1,4 +1,4 @@
-// Package fake provides an in-memory ProtocolDriver/Session implementation that
+// Package fake provides an in-memory Driver/Session implementation that
 // spawns no process. It exists to prove the driver abstraction end-to-end and to
 // serve as a test double for hosts: a session can be scripted to emit an
 // arbitrary sequence of events per prompt, and resume is modelled by
@@ -28,31 +28,29 @@ type Script struct {
 	InterruptWait <-chan struct{}
 }
 
-// Driver is an in-memory ProtocolDriver. It mints monotonic session ids and
+// Driver is an in-memory Driver. It mints monotonic session ids and
 // hands each opened session an optional queue of Scripts consumed one-per-Prompt.
 type Driver struct {
+	ctx            context.Context
+	spec           driver.AgentSpec
 	mu             sync.Mutex
 	seq            atomic.Uint64
 	stored         []driver.StoredSessionMeta
-	scripts        map[driver.SessionKey][]Script
-	probe          driver.RuntimeProbe
+	scripts        [][]Script
+	probe          driver.ProbeAuth
 	probeErr       error
 	requireInstall bool
 }
 
 // New constructs a fake driver reporting an installed+authed probe by default.
-func New() *Driver {
+func New(ctx context.Context, spec driver.AgentSpec) *Driver {
 	return &Driver{
-		scripts: make(map[driver.SessionKey][]Script),
-		probe: driver.RuntimeProbe{
-			Auth:      driver.AuthAuthed,
-			Transport: driver.TransportFake,
-		},
+		ctx: ctx, spec: spec, probe: driver.AuthAuthed,
 	}
 }
 
 // SetProbe overrides what Probe returns (test knob).
-func (d *Driver) SetProbe(p driver.RuntimeProbe, err error) {
+func (d *Driver) SetProbe(p driver.ProbeAuth, err error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.probe = p
@@ -75,26 +73,22 @@ func (d *Driver) SetStoredSessions(metas []driver.StoredSessionMeta) {
 	d.stored = metas
 }
 
-// ScriptSession queues the Scripts a session (identified by key) will replay,
-// one per Prompt call, in order.
-func (d *Driver) ScriptSession(key driver.SessionKey, scripts ...Script) {
+// ScriptNextSession sets the Scripts that the next opened session will replay.
+func (d *Driver) ScriptNextSession(scripts ...Script) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	d.scripts[key] = append(d.scripts[key], scripts...)
+	d.scripts = append(d.scripts, append([]Script(nil), scripts...))
 }
 
-// Transport implements driver.ProtocolDriver.
-func (d *Driver) Transport() driver.Transport { return driver.TransportFake }
-
-// Probe implements driver.ProtocolDriver.
-func (d *Driver) Probe(ctx context.Context) (driver.RuntimeProbe, error) {
+// Probe implements driver.Driver.
+func (d *Driver) Probe() (driver.ProbeAuth, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.probe, d.probeErr
 }
 
-// ListSessions implements driver.ProtocolDriver.
-func (d *Driver) ListSessions(ctx context.Context, params driver.ListSessionsParams) ([]driver.StoredSessionMeta, error) {
+// ListSessions implements driver.Driver.
+func (d *Driver) ListSessions(params driver.ListSessionsParams) ([]driver.StoredSessionMeta, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	out := make([]driver.StoredSessionMeta, 0, len(d.stored))
@@ -106,39 +100,31 @@ func (d *Driver) ListSessions(ctx context.Context, params driver.ListSessionsPar
 	return out, nil
 }
 
-// OpenSession implements driver.ProtocolDriver.
-func (d *Driver) OpenSession(ctx context.Context, key driver.SessionKey, spec driver.AgentSpec, params driver.OpenParams) (*driver.SessionAttachment, error) {
+// OpenSession implements driver.Driver.
+func (d *Driver) OpenSession(params driver.OpenParams) (*driver.SessionAttachment, error) {
 	d.mu.Lock()
 	require := d.requireInstall
+	var scripts []Script
+	if len(d.scripts) > 0 {
+		scripts = d.scripts[0]
+		d.scripts = d.scripts[1:]
+	}
 	d.mu.Unlock()
 
 	// Real drivers always do this at OpenSession; the fake does it only when
 	// asked, so the not_installed contract can be exercised without a process.
 	if require {
-		if _, err := driver.ResolveExecutable(spec); err != nil {
+		if _, err := driver.ResolveExecutable(d.spec); err != nil {
 			return nil, err
 		}
 	}
 
 	bus := driver.NewEventBus()
 	s := &session{
-		driver: d,
-		key:    key,
-		bus:    bus,
-		resume: params.ResumeSessionID,
+		ctx: d.ctx, driver: d, bus: bus, resume: params.ResumeSessionID, scripts: scripts,
 	}
 	s.state.Store(&driver.ProcessState{Phase: driver.PhaseIdle})
 	return &driver.SessionAttachment{Session: s, Events: bus}, nil
-}
-
-func (d *Driver) script(key driver.SessionKey, index int) (Script, bool) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	scripts := d.scripts[key]
-	if index >= len(scripts) {
-		return Script{}, false
-	}
-	return scripts[index], true
 }
 
 func (d *Driver) nextSessionID() driver.SessionID {
@@ -147,10 +133,11 @@ func (d *Driver) nextSessionID() driver.SessionID {
 
 // session implements driver.Session in memory.
 type session struct {
-	driver *Driver
-	key    driver.SessionKey
-	bus    *driver.EventBus
-	resume driver.SessionID
+	ctx     context.Context
+	driver  *Driver
+	bus     *driver.EventBus
+	resume  driver.SessionID
+	scripts []Script
 
 	mu        sync.Mutex
 	sessionID driver.SessionID
@@ -169,8 +156,6 @@ type turn struct {
 	interrupted bool
 }
 
-func (s *session) Key() driver.SessionKey { return s.key }
-
 func (s *session) SessionID() driver.SessionID {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -184,14 +169,25 @@ func (s *session) ProcessState() driver.ProcessState {
 	return driver.ProcessState{Phase: driver.PhaseIdle}
 }
 
+func (s *session) Raw() (driver.RawSessionData, error) {
+	return driver.RawSessionData{}, driver.NewUnsupportedError("fake: raw session data are not supported")
+}
+
+func (s *session) TokenStatistics() (driver.TokenUsage, error) {
+	return driver.TokenUsage{}, driver.NewUnsupportedError("fake: session token statistics are not supported")
+}
+
 func (s *session) setState(st driver.ProcessState) {
 	s.state.Store(&st)
-	s.bus.Emit(driver.LifecycleEvent(s.key, st))
+	s.bus.Emit(driver.LifecycleEvent(st))
 }
 
 // Run brings the session online: resume reuses the pre-assigned id, otherwise a
 // fresh one is minted. An init prompt, if given, is delivered as the first turn.
-func (s *session) Run(ctx context.Context, initPrompt *driver.PromptReq) error {
+func (s *session) Run(initPrompt *driver.PromptReq) error {
+	if err := s.ctx.Err(); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
@@ -206,11 +202,11 @@ func (s *session) Run(ctx context.Context, initPrompt *driver.PromptReq) error {
 	s.mu.Unlock()
 
 	s.setState(driver.ProcessState{Phase: driver.PhaseStarting})
-	s.bus.Emit(driver.SessionAttachedEvent(s.key, sid))
+	s.bus.Emit(driver.SessionAttachedEvent(sid))
 	s.setState(driver.ProcessState{Phase: driver.PhaseActive, SessionID: sid})
 
 	if initPrompt != nil {
-		if _, err := s.Prompt(ctx, *initPrompt); err != nil {
+		if _, err := s.Prompt(*initPrompt); err != nil {
 			return err
 		}
 	}
@@ -218,13 +214,13 @@ func (s *session) Run(ctx context.Context, initPrompt *driver.PromptReq) error {
 }
 
 // Prompt replays the next scripted response (or a trivial echo when unscripted).
-func (s *session) Prompt(ctx context.Context, req driver.PromptReq) (driver.RunID, error) {
+func (s *session) Prompt(req driver.PromptReq) (driver.RunID, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
 		return "", driver.NewUnsupportedError("fake: session is closed")
 	}
-	if err := ctx.Err(); err != nil {
+	if err := s.ctx.Err(); err != nil {
 		return "", err
 	}
 	sid := s.sessionID
@@ -245,11 +241,12 @@ func (s *session) Prompt(ctx context.Context, req driver.PromptReq) (driver.RunI
 }
 
 func (s *session) nextScriptLocked() (Script, bool) {
-	script, ok := s.driver.script(s.key, s.scriptIdx)
-	if ok {
-		s.scriptIdx++
+	if s.scriptIdx >= len(s.scripts) {
+		return Script{}, false
 	}
-	return script, ok
+	script := s.scripts[s.scriptIdx]
+	s.scriptIdx++
+	return script, true
 }
 
 func (s *session) startScriptLocked(script Script) driver.RunID {
@@ -276,31 +273,34 @@ func (s *session) execute(t *turn) {
 		return
 	}
 	for _, item := range t.script.Items {
-		s.bus.Emit(driver.OutputEvent(s.key, s.sessionID, t.runID, item))
+		s.bus.Emit(driver.OutputEvent(s.sessionID, t.runID, item))
 	}
 	if t.script.Blocked != nil {
 		reason := *t.script.Blocked
 		s.active = nil
 		s.blocked = &reason
-		s.bus.Emit(driver.BlockedEvent(s.key, s.sessionID, t.runID, reason))
+		s.bus.Emit(driver.BlockedEvent(s.sessionID, t.runID, reason))
 		s.setState(driver.ProcessState{Phase: driver.PhaseBlocked, SessionID: s.sessionID, RunID: t.runID})
 		return
 	}
-	s.bus.Emit(driver.OutputEvent(s.key, s.sessionID, t.runID, driver.AgentEventItem{Kind: driver.ItemTurnEnd}))
+	s.bus.Emit(driver.OutputEvent(s.sessionID, t.runID, driver.AgentEventItem{Kind: driver.ItemTurnEnd}))
 	if t.script.FailWith != nil {
-		s.bus.Emit(driver.FailedEvent(s.key, s.sessionID, t.runID, t.script.FailWith))
+		s.bus.Emit(driver.FailedEvent(s.sessionID, t.runID, t.script.FailWith))
 	} else {
 		result := t.script.Result
 		if result.FinishReason == "" {
 			result.FinishReason = driver.FinishNatural
 		}
-		s.bus.Emit(driver.CompletedEvent(s.key, s.sessionID, t.runID, result))
+		s.bus.Emit(driver.CompletedEvent(s.sessionID, t.runID, result))
 	}
 	s.active = nil
 	s.setState(driver.ProcessState{Phase: driver.PhaseActive, SessionID: s.sessionID})
 }
 
-func (s *session) Continue(ctx context.Context, input string) (driver.RunID, error) {
+func (s *session) Continue(input string) (driver.RunID, error) {
+	if err := s.ctx.Err(); err != nil {
+		return "", err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
@@ -330,7 +330,8 @@ func (s *session) Continue(ctx context.Context, input string) (driver.RunID, err
 }
 
 // Interrupt is an idempotent no-op unless a run is currently in flight.
-func (s *session) Interrupt(ctx context.Context) error {
+func (s *session) Interrupt() error {
+	ctx := s.ctx
 	s.mu.Lock()
 	if s.blocked != nil {
 		s.blocked = nil
@@ -360,14 +361,14 @@ func (s *session) Interrupt(ctx context.Context) error {
 	t.interrupted = true
 	close(t.stop)
 	s.active = nil
-	s.bus.Emit(driver.OutputEvent(s.key, s.sessionID, t.runID, driver.AgentEventItem{Kind: driver.ItemTurnEnd}))
-	s.bus.Emit(driver.CompletedEvent(s.key, s.sessionID, t.runID, driver.RunResult{FinishReason: driver.FinishCancelled}))
+	s.bus.Emit(driver.OutputEvent(s.sessionID, t.runID, driver.AgentEventItem{Kind: driver.ItemTurnEnd}))
+	s.bus.Emit(driver.CompletedEvent(s.sessionID, t.runID, driver.RunResult{FinishReason: driver.FinishCancelled}))
 	s.setState(driver.ProcessState{Phase: driver.PhaseActive, SessionID: s.sessionID})
 	return nil
 }
 
 // Close moves to PhaseClosed and closes the event bus. Idempotent.
-func (s *session) Close(ctx context.Context) error {
+func (s *session) Close() error {
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
@@ -382,6 +383,6 @@ func (s *session) Close(ctx context.Context) error {
 
 // Compile-time interface checks.
 var (
-	_ driver.ProtocolDriver = (*Driver)(nil)
-	_ driver.Session        = (*session)(nil)
+	_ driver.Driver  = (*Driver)(nil)
+	_ driver.Session = (*session)(nil)
 )

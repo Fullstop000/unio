@@ -117,21 +117,20 @@ func TestClaudeDriverFullTurn(t *testing.T) {
 	}
 	tr := newScriptedTransport(lines)
 
-	d := newWithTransport(func(ctx context.Context, execPath string, args []string, spec driver.AgentSpec) (transport, error) {
+	d := newWithTransport(context.Background(), driver.AgentSpec{ExecutablePath: fakeInstalledBinary(t), Model: "claude-sonnet-4-6"}, func(ctx context.Context, execPath string, args []string, spec driver.AgentSpec) (transport, error) {
 		return tr, nil
 	})
 	// Bypass the PATH check for the injected transport.
-	key := driver.SessionKey("w-s")
-	att, err := d.OpenSession(context.Background(), key, driver.AgentSpec{ExecutablePath: fakeInstalledBinary(t), Model: "claude-sonnet-4-6"}, driver.OpenParams{})
+	att, err := d.OpenSession(driver.OpenParams{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	ch := att.Events.Subscribe()
 
-	if err := att.Session.Run(context.Background(), nil); err != nil {
+	if err := att.Session.Run(nil); err != nil {
 		t.Fatal(err)
 	}
-	runID, err := att.Session.Prompt(context.Background(), driver.PromptReq{Text: "read main.go"})
+	runID, err := att.Session.Prompt(driver.PromptReq{Text: "read main.go"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +187,7 @@ func TestClaudeDriverFullTurn(t *testing.T) {
 		t.Fatalf("stdin should carry the user message, got %q", joined)
 	}
 
-	_ = att.Session.Close(context.Background())
+	_ = att.Session.Close()
 }
 
 func TestClaudeDriverErrorResult(t *testing.T) {
@@ -197,17 +196,16 @@ func TestClaudeDriverErrorResult(t *testing.T) {
 		`{"type":"result","subtype":"error","is_error":true,"result":"context limit","stop_reason":"error","session_id":"sess-err"}`,
 	}
 	tr := newScriptedTransport(lines)
-	d := newWithTransport(func(ctx context.Context, execPath string, args []string, spec driver.AgentSpec) (transport, error) {
+	d := newWithTransport(context.Background(), driver.AgentSpec{ExecutablePath: fakeInstalledBinary(t)}, func(ctx context.Context, execPath string, args []string, spec driver.AgentSpec) (transport, error) {
 		return tr, nil
 	})
-	key := driver.SessionKey("w-s")
-	att, err := d.OpenSession(context.Background(), key, driver.AgentSpec{ExecutablePath: fakeInstalledBinary(t)}, driver.OpenParams{})
+	att, err := d.OpenSession(driver.OpenParams{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	ch := att.Events.Subscribe()
-	_ = att.Session.Run(context.Background(), nil)
-	runID, _ := att.Session.Prompt(context.Background(), driver.PromptReq{Text: "x"})
+	_ = att.Session.Run(nil)
+	runID, _ := att.Session.Prompt(driver.PromptReq{Text: "x"})
 	go tr.feed()
 
 	evs := collect(t, ch, func(ev driver.AgentEvent) bool {
@@ -223,25 +221,25 @@ func TestClaudeDriverErrorResult(t *testing.T) {
 	if !failed {
 		t.Fatal("expected a runtime_reported Failed event")
 	}
-	_ = att.Session.Close(context.Background())
+	_ = att.Session.Close()
 }
 
 func TestClaudeInterruptKillsTurnAsCancelled(t *testing.T) {
 	tr := newScriptedTransport([]string{
 		`{"type":"system","subtype":"init","session_id":"sess-interrupt"}`,
 	})
-	d := newWithTransport(func(context.Context, string, []string, driver.AgentSpec) (transport, error) {
+	d := newWithTransport(context.Background(), driver.AgentSpec{ExecutablePath: fakeInstalledBinary(t)}, func(context.Context, string, []string, driver.AgentSpec) (transport, error) {
 		return tr, nil
 	})
-	att, err := d.OpenSession(context.Background(), "interrupt", driver.AgentSpec{ExecutablePath: fakeInstalledBinary(t)}, driver.OpenParams{})
+	att, err := d.OpenSession(driver.OpenParams{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	events := att.Events.Subscribe()
-	if err := att.Session.Run(context.Background(), nil); err != nil {
+	if err := att.Session.Run(nil); err != nil {
 		t.Fatal(err)
 	}
-	run, err := att.Session.Prompt(context.Background(), driver.PromptReq{Text: "long"})
+	run, err := att.Session.Prompt(driver.PromptReq{Text: "long"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -249,7 +247,7 @@ func TestClaudeInterruptKillsTurnAsCancelled(t *testing.T) {
 	collect(t, events, func(ev driver.AgentEvent) bool {
 		return ev.Type == driver.EventSessionAttached
 	}, 2*time.Second)
-	if err := att.Session.Interrupt(context.Background()); err != nil {
+	if err := att.Session.Interrupt(); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -269,77 +267,73 @@ func TestClaudeInterruptKillsTurnAsCancelled(t *testing.T) {
 func TestClaudePromptRejectsShortWrite(t *testing.T) {
 	tr := newScriptedTransport(nil)
 	tr.shortWrite = true
-	d := newWithTransport(func(context.Context, string, []string, driver.AgentSpec) (transport, error) { return tr, nil })
-	att, err := d.OpenSession(context.Background(), "short-write", driver.AgentSpec{ExecutablePath: fakeInstalledBinary(t)}, driver.OpenParams{})
+	d := newWithTransport(context.Background(), driver.AgentSpec{ExecutablePath: fakeInstalledBinary(t)}, func(context.Context, string, []string, driver.AgentSpec) (transport, error) { return tr, nil })
+	att, err := d.OpenSession(driver.OpenParams{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := att.Session.Run(context.Background(), nil); err != nil {
+	if err := att.Session.Run(nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := att.Session.Prompt(context.Background(), driver.PromptReq{Text: "hello"}); err == nil {
+	if _, err := att.Session.Prompt(driver.PromptReq{Text: "hello"}); err == nil {
 		t.Fatal("short JSONL write was accepted")
 	}
 }
 
-func TestClaudeCloseReturnsContextErrorBeforeReap(t *testing.T) {
+func TestClaudeCloseWaitsForReapAfterLifecycleCancellation(t *testing.T) {
 	tr := newScriptedTransport(nil)
 	tr.waitGate = make(chan struct{})
-	d := newWithTransport(func(context.Context, string, []string, driver.AgentSpec) (transport, error) { return tr, nil })
-	att, err := d.OpenSession(context.Background(), "close-timeout", driver.AgentSpec{ExecutablePath: fakeInstalledBinary(t)}, driver.OpenParams{})
+	ctx, cancel := context.WithCancel(context.Background())
+	d := newWithTransport(ctx, driver.AgentSpec{ExecutablePath: fakeInstalledBinary(t)}, func(context.Context, string, []string, driver.AgentSpec) (transport, error) { return tr, nil })
+	att, err := d.OpenSession(driver.OpenParams{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := att.Session.Run(context.Background(), nil); err != nil {
+	if err := att.Session.Run(nil); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
-	defer cancel()
-	err = att.Session.Close(ctx)
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("Close error = %v; want context deadline", err)
-	}
-	retryDone := make(chan error, 1)
-	go func() { retryDone <- att.Session.Close(context.Background()) }()
+	cancel()
+	done := make(chan error, 1)
+	go func() { done <- att.Session.Close() }()
 	select {
-	case err := <-retryDone:
-		t.Fatalf("retry Close returned before reaping: %v", err)
+	case err := <-done:
+		t.Fatalf("Close returned before reaping: %v", err)
 	case <-time.After(20 * time.Millisecond):
 	}
 	close(tr.waitGate)
-	if err := <-retryDone; err != nil {
-		t.Fatalf("retry Close after reaping: %v", err)
+	if err := <-done; err != nil {
+		t.Fatalf("Close after reaping: %v", err)
 	}
 }
 
 func TestClaudeProcessLifetimeDoesNotUseTurnContext(t *testing.T) {
 	tr := newScriptedTransport(nil)
 	var factoryCtx context.Context
-	d := newWithTransport(func(ctx context.Context, _ string, _ []string, _ driver.AgentSpec) (transport, error) {
+	ctx, cancel := context.WithCancel(context.Background())
+	d := newWithTransport(ctx, driver.AgentSpec{ExecutablePath: fakeInstalledBinary(t)}, func(ctx context.Context, _ string, _ []string, _ driver.AgentSpec) (transport, error) {
 		factoryCtx = ctx
 		return tr, nil
 	})
-	att, err := d.OpenSession(context.Background(), "lifetime", driver.AgentSpec{ExecutablePath: fakeInstalledBinary(t)}, driver.OpenParams{})
+	att, err := d.OpenSession(driver.OpenParams{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	if err := att.Session.Run(ctx, nil); err != nil {
+	if err := att.Session.Run(nil); err != nil {
 		t.Fatal(err)
 	}
 	cancel()
 	if err := factoryCtx.Err(); err != nil {
 		t.Fatalf("process context was cancelled with turn context: %v", err)
 	}
-	_ = att.Session.Close(context.Background())
+	_ = att.Session.Close()
 }
 
 func TestClaudeMissingResumeDoesNotStartFresh(t *testing.T) {
 	original := fileExists
 	fileExists = func(string) bool { return false }
 	t.Cleanup(func() { fileExists = original })
-	d := New()
-	_, err := d.OpenSession(context.Background(), "resume", driver.AgentSpec{ExecutablePath: fakeInstalledBinary(t), Cwd: "/repo"}, driver.OpenParams{ResumeSessionID: "missing"})
+	d := New(context.Background(), driver.AgentSpec{ExecutablePath: fakeInstalledBinary(t), Cwd: "/repo"})
+	_, err := d.OpenSession(driver.OpenParams{ResumeSessionID: "missing"})
 	var agentErr *driver.AgentError
 	if !errors.As(err, &agentErr) || agentErr.Kind != driver.ErrSessionNotFound {
 		t.Fatalf("resume error = %v", err)
@@ -356,17 +350,16 @@ func TestClaudeDriverNonStreamingCompleteMessage(t *testing.T) {
 		`{"type":"result","subtype":"success","is_error":false,"result":"Hi!","stop_reason":"end_turn","session_id":"sess-ns","duration_ms":10,"total_cost_usd":0.08}`,
 	}
 	tr := newScriptedTransport(lines)
-	d := newWithTransport(func(ctx context.Context, execPath string, args []string, spec driver.AgentSpec) (transport, error) {
+	d := newWithTransport(context.Background(), driver.AgentSpec{ExecutablePath: fakeInstalledBinary(t)}, func(ctx context.Context, execPath string, args []string, spec driver.AgentSpec) (transport, error) {
 		return tr, nil
 	})
-	key := driver.SessionKey("w-s")
-	att, err := d.OpenSession(context.Background(), key, driver.AgentSpec{ExecutablePath: fakeInstalledBinary(t)}, driver.OpenParams{})
+	att, err := d.OpenSession(driver.OpenParams{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	ch := att.Events.Subscribe()
-	_ = att.Session.Run(context.Background(), nil)
-	runID, _ := att.Session.Prompt(context.Background(), driver.PromptReq{Text: "hi"})
+	_ = att.Session.Run(nil)
+	runID, _ := att.Session.Prompt(driver.PromptReq{Text: "hi"})
 	go tr.feed()
 
 	evs := collect(t, ch, func(ev driver.AgentEvent) bool {
@@ -392,7 +385,7 @@ func TestClaudeDriverNonStreamingCompleteMessage(t *testing.T) {
 	if !text || !toolCall {
 		t.Fatalf("non-streaming path should emit text+tool from complete message: text=%v tool=%v", text, toolCall)
 	}
-	_ = att.Session.Close(context.Background())
+	_ = att.Session.Close()
 }
 
 func TestClaudeArgsKeepExplicitResumeID(t *testing.T) {
@@ -413,20 +406,20 @@ func TestClaudeProbeNotInstalled(t *testing.T) {
 	// Point PATH at an empty dir so `claude` won't resolve.
 	t.Setenv("PATH", t.TempDir())
 
-	d := New()
-	pr, err := d.Probe(context.Background())
+	d := New(context.Background(), driver.AgentSpec{})
+	pr, err := d.Probe()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pr.Auth != driver.AuthNotInstalled {
-		t.Fatalf("expected not-installed probe, got %s", pr.Auth)
+	if pr != driver.AuthNotInstalled {
+		t.Fatalf("expected not-installed probe, got %s", pr)
 	}
 }
 
 func TestClaudeOpenSessionNotInstalled(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
-	d := New()
-	_, err := d.OpenSession(context.Background(), driver.SessionKey(""), driver.AgentSpec{ExecutablePath: "claude"}, driver.OpenParams{})
+	d := New(context.Background(), driver.AgentSpec{})
+	_, err := d.OpenSession(driver.OpenParams{})
 	if err == nil {
 		t.Fatal("OpenSession should fail not-installed when claude is absent")
 	}

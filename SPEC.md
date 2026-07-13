@@ -4,7 +4,7 @@ unio is a multi-language SDK family. Every implementation must expose the same
 human-aligned behavior even though Claude Code and Codex use different runtime
 protocols.
 
-**Spec version: 0.4.0**
+**Spec version: 0.6.0**
 
 ## 1. Public object model
 
@@ -68,6 +68,10 @@ Creating an Agent resolves the concrete runtime and probes availability. A
 missing CLI returns `not_installed`; an unavailable authentication state returns
 an error rather than a half-initialized Agent.
 
+The context passed to `New` owns the Agent lifecycle. Cancelling it closes the
+Agent and every Session derived from it. Agent and Session methods do not accept
+independent operation contexts.
+
 One Agent owns one concrete driver for its lifetime. Multiplexing runtimes such
 as Codex and ACP v1 agents share one child process across that Agent's sessions.
 
@@ -110,10 +114,10 @@ Only one turn may run per Session. A concurrent `Run`, `Stream`, or invalid
 - idle -> interrupt is an idempotent no-op.
 
 Confirmed interruption is normal control flow and sets `Result.Interrupted`.
-Failure to deliver or confirm interruption is an error. Context cancellation
-requests interruption and must not expose idle before runtime confirmation.
-For a manual Stream, the Session remains running until that Stream consumes its
-terminal event; a new turn is rejected before then.
+Failure to deliver or confirm interruption is an error. Cancelling the Agent's
+lifecycle context terminates the Agent instead of acting as a reusable
+per-turn interruption. For a manual Stream, the Session remains running until
+that Stream consumes its terminal event; a new turn is rejected before then.
 
 ### Block and continue
 
@@ -126,6 +130,23 @@ back to running.
 
 Partial text, thinking, tool calls, and usage produced before blocking or
 interruption remain in the Result.
+
+### Token usage and session statistics
+
+`Result.Usage` describes one turn. It is populated only from usage associated
+with that turn and must not contain an entire session's cumulative usage.
+
+`Session.Raw` is a separate, optional capability that returns the complete
+runtime-owned persisted session representation and its format. It requires an
+idle Session with a runtime ID.
+
+`Session.TokenStatistics` parses the data returned by `Session.Raw` into a
+session-wide aggregate. It never reads another source. Unsupported runtimes
+return `unsupported`; an idle new Session without an ID returns `invalid_state`.
+An incomplete persisted turn returns `protocol` rather than a partial aggregate.
+
+Input token statistics include cached input. Cache-read and cache-write values
+are also exposed separately when present. Missing cost data remains zero.
 
 ## 4. Driver event contract
 

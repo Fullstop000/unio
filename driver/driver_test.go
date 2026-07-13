@@ -21,8 +21,7 @@ func drainOne(t *testing.T, ch <-chan AgentEvent, timeout time.Duration) (AgentE
 func TestEventBusFirstSubscribeReceives(t *testing.T) {
 	bus := NewEventBus()
 	ch := bus.Subscribe()
-	key := SessionKey("w-s")
-	bus.Emit(SessionAttachedEvent(key, "sid-1"))
+	bus.Emit(SessionAttachedEvent("sid-1"))
 
 	ev, ok := drainOne(t, ch, 500*time.Millisecond)
 	if !ok {
@@ -37,8 +36,7 @@ func TestEventBusFanOutToMultiple(t *testing.T) {
 	bus := NewEventBus()
 	a := bus.Subscribe()
 	b := bus.Subscribe()
-	key := SessionKey("w-s")
-	bus.Emit(LifecycleEvent(key, ProcessState{Phase: PhaseActive}))
+	bus.Emit(LifecycleEvent(ProcessState{Phase: PhaseActive}))
 
 	for _, ch := range []<-chan AgentEvent{a, b} {
 		ev, ok := drainOne(t, ch, 500*time.Millisecond)
@@ -52,11 +50,9 @@ func TestEventBusSlowObserverDoesNotStallFast(t *testing.T) {
 	bus := NewEventBus()
 	fast := bus.Subscribe()
 	_ = bus.Subscribe() // slow: never drained
-	key := SessionKey("w-s")
-
 	total := observerCapacity + 20
 	for i := 0; i < total; i++ {
-		bus.Emit(LifecycleEvent(key, ProcessState{Phase: PhaseActive}))
+		bus.Emit(LifecycleEvent(ProcessState{Phase: PhaseActive}))
 		if _, ok := drainOne(t, fast, time.Second); !ok {
 			t.Fatalf("fast observer closed early at %d/%d", i, total)
 		}
@@ -70,7 +66,7 @@ func TestEventBusPreservesTerminalEventForFullObserver(t *testing.T) {
 	bus := NewEventBus()
 	ch := bus.Subscribe()
 	for i := 0; i < observerCapacity+1; i++ {
-		bus.Emit(OutputEvent("key", "sid", "run", AgentEventItem{Kind: ItemText, Text: "x"}))
+		bus.Emit(OutputEvent("sid", "run", AgentEventItem{Kind: ItemText, Text: "x"}))
 	}
 	deadline := time.Now().Add(2 * time.Second)
 	for bus.Dropped() == 0 && time.Now().Before(deadline) {
@@ -80,7 +76,7 @@ func TestEventBusPreservesTerminalEventForFullObserver(t *testing.T) {
 		t.Fatal("observer did not become full")
 	}
 	beforeTerminal := bus.Dropped()
-	bus.Emit(CompletedEvent("key", "sid", "run", RunResult{FinishReason: FinishNatural}))
+	bus.Emit(CompletedEvent("sid", "run", RunResult{FinishReason: FinishNatural}))
 	deadline = time.Now().Add(2 * time.Second)
 	for bus.Dropped() == beforeTerminal && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
@@ -103,9 +99,8 @@ func TestEventBusPreservesTerminalEventForFullObserver(t *testing.T) {
 func TestEventBusCloseDrainsAndClosesObservers(t *testing.T) {
 	bus := NewEventBus()
 	ch := bus.Subscribe()
-	key := SessionKey("w-s")
 	for i := 0; i < 3; i++ {
-		bus.Emit(LifecycleEvent(key, ProcessState{Phase: PhaseActive}))
+		bus.Emit(LifecycleEvent(ProcessState{Phase: PhaseActive}))
 	}
 	bus.Close()
 
@@ -227,7 +222,7 @@ func TestBlockedEventCarriesReason(t *testing.T) {
 		Message: "Allow go test?",
 		Options: []BlockOption{{Value: "allow_once", Label: "Allow once"}},
 	}
-	ev := BlockedEvent("key", "sid", "run", reason)
+	ev := BlockedEvent("sid", "run", reason)
 	if ev.Type != EventBlocked || ev.Blocked == nil || ev.Blocked.Kind != BlockedToolApproval {
 		t.Fatalf("unexpected blocked event: %+v", ev)
 	}

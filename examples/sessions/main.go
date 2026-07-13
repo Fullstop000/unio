@@ -11,13 +11,13 @@ import (
 
 func main() {
 	ctx := context.Background()
-	agent, err := unio.New(unio.Codex)
+	agent, err := unio.New(ctx, unio.Codex)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer agent.Close()
 
-	sessions, err := agent.ListSessions(ctx)
+	sessions, err := agent.ListSessions()
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -28,7 +28,7 @@ func main() {
 		return
 	}
 
-	session, err := agent.GetSession(ctx, sessions[0].ID)
+	session, err := agent.GetSession(sessions[0].ID)
 	if err != nil {
 		log.Fatal(err)
 	}
