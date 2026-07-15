@@ -14,17 +14,18 @@ unsupported until a release gate covers it.
 
 The Python implementation supports Python 3.11–3.14. On 2026-07-15, its
 deterministic protocol suite, strict type check, package build, metadata check,
-and clean-wheel import passed locally on macOS arm64 with Python 3.12.13. No
-Python real-runtime E2E has been run yet, so the runtime statuses below remain
-experimental for Python even where the Go adapter has stronger evidence.
+and clean-wheel import passed locally on macOS arm64 with Python 3.12.13. Its
+six authenticated real-runtime E2E cases also passed there: streaming,
+persisted session discovery and resume, interruption, and post-interrupt reuse
+were exercised across Codex, TraeX, and OpenCode.
 
 | Agent | Executable discovery | Evidence on 2026-07-15 | Status |
 | --- | --- | --- | --- |
 | Claude Code | `claude` | Real E2E exists but was not run in the release environment | Experimental compatibility |
-| Codex | `codex` | CLI 0.144.2 detected on macOS arm64; real E2E pending explicit token approval | Release candidate |
+| Codex | `codex` | CLI 0.144.2; Python real E2E passed on macOS arm64 | Verified on listed CLI |
 | Kimi | `kimi-cli`, `kimi` | Not installed in the release environment | Experimental compatibility |
-| TraeX | `traex`, `trae-cli`, `coco`, `traecli` | Not installed in the release environment | Experimental compatibility |
-| OpenCode | `opencode` | Not installed in the release environment | Experimental compatibility |
+| TraeX | `traex`, `trae-cli`, `coco`, `traecli` | CLI 0.200.17; Python ACP real E2E passed on macOS arm64 | Verified on listed CLI |
+| OpenCode | `opencode` | CLI 1.17.18 with `deepseek/deepseek-v4-flash`; Python ACP real E2E passed on macOS arm64 | Verified on listed CLI |
 
 "Experimental compatibility" means the adapter and deterministic protocol
 tests are present, but this release has no claim of live compatibility with a

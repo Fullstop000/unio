@@ -10,7 +10,7 @@ import pytest
 
 import unio
 from unio._driver import AgentSpec, DriverEventType, OutputKind, ProcessPhase
-from unio._drivers.acp import ACPSession, _ACPProcess, _Config
+from unio._drivers.acp import _ACP_STREAM_LIMIT, ACPSession, _ACPProcess, _Config, _config
 from unio._drivers.claude import ClaudeSession
 from unio._drivers.codex import CodexSession, _CodexProcess
 
@@ -126,6 +126,18 @@ def test_acp_updates_map_thinking_tools_and_permission(tmp_path: Path) -> None:
     assert tool.item is not None and tool.item.tool == "shell"
     assert result.item is not None and result.item.kind is OutputKind.TOOL_RESULT
     assert blocked.blocked is not None and blocked.blocked.options[0].value == "yes"
+
+
+def test_acp_stream_limit_accepts_large_single_line_responses() -> None:
+    # OpenCode includes its complete model catalog in session/new. That JSON-RPC
+    # response can exceed asyncio's 64 KiB default StreamReader limit.
+    response = json.dumps({"models": ["x" * 1024] * 128}).encode() + b"\n"
+    assert len(response) > 64 * 1024
+    assert len(response) < _ACP_STREAM_LIMIT
+
+
+def test_traex_discovers_the_canonical_user_install_path() -> None:
+    assert str(Path.home() / ".local/bin/traecli") in _config(unio.TraeX).alternatives
 
 
 def test_acp_persisted_statistics_match_runtime_formats(tmp_path: Path) -> None:

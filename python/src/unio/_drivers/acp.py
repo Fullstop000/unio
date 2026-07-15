@@ -33,6 +33,8 @@ from ..models import (
     TokenStatistics,
 )
 
+_ACP_STREAM_LIMIT = 8 * 1024 * 1024
+
 
 def _object(value: Any) -> dict[str, Any]:
     return cast(dict[str, Any], value) if isinstance(value, dict) else {}
@@ -81,6 +83,7 @@ def _config(kind: AgentKind) -> _Config:
                 str(home / ".local/bin/traex"),
                 str(home / ".local/bin/trae-cli"),
                 str(home / ".local/bin/coco"),
+                str(home / ".local/bin/traecli"),
             ),
         )
     return _Config("opencode", "opencode", (str(home / ".opencode/bin/opencode"),))
@@ -154,6 +157,7 @@ class _ACPProcess:
                     stdin=asyncio.subprocess.PIPE,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
+                    limit=_ACP_STREAM_LIMIT,
                 )
             except OSError as error:
                 raise transport(f"acp: start {self._config.name}: {error}") from error

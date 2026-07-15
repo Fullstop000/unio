@@ -149,8 +149,21 @@ Runnable examples are in
 For local quality gates and release steps, see the [contribution
 guide](https://github.com/Fullstop000/unio/blob/master/CONTRIBUTING.md).
 
-Authenticated Codex E2E tests are opt-in because they can consume tokens:
+Authenticated Codex, TraeX, and OpenCode E2E tests are opt-in because they can
+consume tokens:
 
 ```sh
 UNIO_RUN_REAL_E2E=1 pytest -s tests/e2e_real
 ```
+
+Run one runtime directly with:
+
+```sh
+UNIO_RUN_REAL_E2E=1 pytest -s tests/e2e_real/test_codex.py
+UNIO_RUN_REAL_E2E=1 pytest -s tests/e2e_real/test_acp.py -k traex
+UNIO_RUN_REAL_E2E=1 pytest -s tests/e2e_real/test_acp.py -k opencode
+```
+
+The OpenCode test defaults to `deepseek/deepseek-v4-flash`. Override it with
+`UNIO_E2E_OPENCODE_MODEL=provider/model` when another authenticated model is
+available locally.
