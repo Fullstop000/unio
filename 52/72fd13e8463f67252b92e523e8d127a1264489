@@ -1,0 +1,31 @@
+docs/API_SUPPORT.md
+  s_f365f7cae9f071::t_6f99b1e4d7c18b 17-20,25,27-28
+python/CHANGELOG.md
+  s_f365f7cae9f071::t_ff433a2fadca4e 6-7
+python/README.md
+  s_f365f7cae9f071::t_e374e5310ed333 152-153,158-169
+python/src/unio/_drivers/acp.py
+  s_f365f7cae9f071::t_4cb88eb7888aad 36-37,86,160
+python/tests/e2e_real/test_acp.py
+  s_f365f7cae9f071::t_f60707e42a0b8f 1-159
+python/tests/test_protocols.py
+  s_f365f7cae9f071::t_cf2f51f48a3d3a 13,131-142
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "5272fd13e8463f67252b92e523e8d127a1264489",
+  "prompts": {},
+  "sessions": {
+    "s_f365f7cae9f071": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6466-eb5a-7962-b8ae-05ac2a874b03",
+        "model": "unknown"
+      },
+      "human_author": "Fullstop000 <fullstop1005@gmail.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
