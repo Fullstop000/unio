@@ -1,0 +1,27 @@
+CHANGELOG.md
+  s_f365f7cae9f071::t_257c43f36d4f7f 5,7-8
+README.md
+  s_f365f7cae9f071::t_8c1432b50237b9 13-16
+docs/API_SUPPORT.md
+  s_f365f7cae9f071::t_e06ebb9bd50597 140-142
+docs/ERRORS.md
+  s_f365f7cae9f071::t_0e331a3be9c78a 1-113
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "787df7b23606a0253dcce73eea61bbd1c6a3df74",
+  "prompts": {},
+  "sessions": {
+    "s_f365f7cae9f071": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6466-eb5a-7962-b8ae-05ac2a874b03",
+        "model": "unknown"
+      },
+      "human_author": "Fullstop000 <fullstop1005@gmail.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
