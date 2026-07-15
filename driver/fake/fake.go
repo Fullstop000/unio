@@ -279,8 +279,8 @@ func (s *session) execute(t *turn) {
 		reason := *t.script.Blocked
 		s.active = nil
 		s.blocked = &reason
-		s.bus.Emit(driver.BlockedEvent(s.sessionID, t.runID, reason))
 		s.setState(driver.ProcessState{Phase: driver.PhaseBlocked, SessionID: s.sessionID, RunID: t.runID})
+		s.bus.Emit(driver.BlockedEvent(s.sessionID, t.runID, reason))
 		return
 	}
 	s.bus.Emit(driver.OutputEvent(s.sessionID, t.runID, driver.AgentEventItem{Kind: driver.ItemTurnEnd}))

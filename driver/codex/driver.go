@@ -457,9 +457,9 @@ func (s *session) setBlocked(ev AppServerEvent, kind driver.BlockedKind, message
 	s.blockMu.Lock()
 	s.block = &pendingBlock{requestID: append(json.RawMessage(nil), ev.RequestID...), reason: reason}
 	s.blockMu.Unlock()
-	s.bus.Emit(driver.BlockedEvent(s.SessionID(), run, reason))
 	s.curRun.Store(ptr(""))
 	s.setState(driver.ProcessState{Phase: driver.PhaseBlocked, SessionID: s.SessionID(), RunID: run})
+	s.bus.Emit(driver.BlockedEvent(s.SessionID(), run, reason))
 }
 
 func (s *session) finishTurnDone() {

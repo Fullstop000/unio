@@ -19,6 +19,7 @@
 - Added `NewSession`, `ListSessions`, and `GetSession` with automatic resume.
 - Added public `Idle`, `Running`, and `Blocked` session states.
 - Added human-aligned `Interrupt` and blocked `Continue` behavior.
+- Made the blocked Session state observable before its blocked event.
 - Added persisted Claude Code and Codex session discovery.
 - Added cwd-scoped session listing with explicit cross-workspace listing.
 - Added a shared ACP v1 driver for Kimi, TraeX, and OpenCode.

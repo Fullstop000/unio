@@ -401,8 +401,8 @@ func (s *session) onPermission(id, params json.RawMessage) {
 	s.permission = &pendingPermission{id: append(json.RawMessage(nil), id...), reason: reason, options: valid}
 	runID := turn.runID
 	s.mu.Unlock()
-	s.bus.Emit(driver.BlockedEvent(s.SessionID(), runID, reason))
 	s.setState(driver.ProcessState{Phase: driver.PhaseBlocked, SessionID: s.SessionID(), RunID: runID})
+	s.bus.Emit(driver.BlockedEvent(s.SessionID(), runID, reason))
 }
 
 func (s *session) onUpdate(raw json.RawMessage) {
