@@ -11,10 +11,8 @@ import (
 // returns the resolved path on success, or a not_installed AgentError naming the
 // primary command when none is found on PATH.
 //
-// Drivers call this at the START of OpenSession so a missing agent CLI surfaces
-// as a clear not_installed error at initialisation time, rather than an obscure
-// failure when the process is later spawned. This is the SDK-level "is the agent
-// installed?" check.
+// Drivers call this while probing and before opening a Session so a missing CLI
+// surfaces as a clear not_installed error rather than an obscure spawn failure.
 func ResolveExecutable(spec AgentSpec) (string, *AgentError) {
 	primary := spec.ExecutablePath
 	candidates := make([]string, 0, 1+len(spec.AltCommands))
@@ -38,9 +36,8 @@ func ResolveExecutable(spec AgentSpec) (string, *AgentError) {
 	return "", errs.NotInstalledCmd(name)
 }
 
-// IsInstalled reports whether the AgentSpec's executable (or an alt) resolves on
-// PATH. Convenience wrapper around ResolveExecutable for a boolean answer, e.g.
-// when a host wants to filter the agent list to installed ones.
+// IsInstalled reports whether the AgentSpec executable or an alternative
+// resolves on PATH.
 func IsInstalled(spec AgentSpec) bool {
 	_, err := ResolveExecutable(spec)
 	return err == nil

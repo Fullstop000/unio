@@ -7,17 +7,12 @@ import (
 	"github.com/Fullstop000/unio/errs"
 )
 
-// Session is one conversation with an Agent.
-//
-// Two locks with opposite holding disciplines. opMu serializes a whole turn
-// operation (Stream/Continue/Interrupt/*Attachment) and is held across the
-// blocking driver I/O within it. mu guards the mutable fields below and is
-// only ever held for a field snapshot or write, never across I/O, so ID and
-// State stay responsive while a turn is in flight. Lock order is always
-// opMu -> mu; functions that take only mu must not take opMu.
+// Session is one conversation with an Agent. One turn may run at a time; use
+// separate Sessions for concurrent turns.
 type Session struct {
 	agent *Agent
-	opMu  sync.Mutex
+	// opMu serializes whole-turn operations. Lock order is opMu then mu.
+	opMu sync.Mutex
 
 	mu      sync.Mutex
 	state   SessionState
@@ -49,7 +44,8 @@ func (s *Session) State() SessionState {
 	return s.state
 }
 
-// Raw returns the runtime-owned persisted representation of this session.
+// Raw returns the runtime-owned persisted representation of this session. It
+// may contain prompts, source, tool data, command output, paths, and secrets.
 // The session must have a runtime ID and must not have an active turn.
 func (s *Session) Raw() (RawSessionData, error) {
 	s.opMu.Lock()

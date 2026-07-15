@@ -9,9 +9,8 @@ import (
 	"github.com/Fullstop000/unio/driver"
 )
 
-// transport is the stdio boundary of one Claude child process. Abstracting it
-// lets integration tests inject a scripted stdin/stdout pair (mirroring Chorus's
-// ClaudeTransport trait) so the handle/reader logic is exercised without a real
+// transport is the stdio boundary of one Claude child process. The abstraction
+// lets integration tests exercise handle and reader logic without a real
 // `claude` binary. The production implementation wraps exec.Cmd.
 type transport interface {
 	// stdin returns the writer for user-message JSON lines.

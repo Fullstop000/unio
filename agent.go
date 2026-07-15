@@ -25,8 +25,9 @@ type Agent struct {
 }
 
 // New initializes an agent runtime whose lifetime is bounded by parent. A
-// successful return means its CLI is installed and available to create
-// sessions. Cancelling parent closes the Agent and every derived Session.
+// successful return means the CLI executable was found; authentication,
+// network, model, and provider errors may surface on the first runtime
+// operation. Cancelling parent closes the Agent and every derived Session.
 func New(parent context.Context, kind AgentKind, opts ...Option) (*Agent, error) {
 	if err := parent.Err(); err != nil {
 		return nil, err
@@ -82,6 +83,7 @@ func (a *Agent) NewSession() (*Session, error) {
 // SessionsIn selects another directory, AllSessions removes the directory
 // filter, and MaxSessions caps the number of returned conversations. Maintained
 // live handles are included even when runtime history has not reached disk yet.
+// Ordering is runtime-defined; metadata fields are best-effort.
 func (a *Agent) ListSessions(opts ...ListSessionsOption) ([]SessionInfo, error) {
 	if a.closed.Load() {
 		return nil, errs.InvalidState("agent is closed")

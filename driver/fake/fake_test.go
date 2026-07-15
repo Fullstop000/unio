@@ -186,6 +186,9 @@ func TestFakeBlockedTurnContinues(t *testing.T) {
 	if ev.Blocked == nil || ev.Blocked.Kind != driver.BlockedToolApproval {
 		t.Fatalf("unexpected block: %+v", ev)
 	}
+	if state := att.Session.ProcessState().Phase; state != driver.PhaseBlocked {
+		t.Fatalf("phase after blocked event = %q; want %q", state, driver.PhaseBlocked)
+	}
 
 	continued, err := att.Session.Continue("allow_once")
 	if err != nil {

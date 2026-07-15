@@ -6,9 +6,8 @@
 // child. The CLI emits one JSON object per line on stdout; the caller writes
 // user messages as single JSON lines to stdin.
 //
-// This file is the STATELESS codec: pure parse/encode of the wire protocol, no
-// process, no channels, no state. It mirrors Chorus's claude_headless.rs so the
-// two implementations decode the same bytes identically.
+// This file is the stateless codec: pure parse/encode of the wire protocol with
+// no process, channel, or session state.
 package claude
 
 import "encoding/json"
@@ -45,8 +44,8 @@ const (
 	EvUnknown HeadlessEventType = "unknown"
 )
 
-// HeadlessEvent is a parsed line of Claude headless stdout (struct+tag form of
-// the Rust enum; only the fields relevant to Type are populated).
+// HeadlessEvent is a parsed line of Claude headless stdout. Only the fields
+// relevant to Type are populated.
 type HeadlessEvent struct {
 	Type HeadlessEventType
 
@@ -69,8 +68,7 @@ type HeadlessEvent struct {
 	IsError    bool
 	StopReason string
 	Subtype    string
-	// CostUSD / DurationMs: EvTurnResult (unio usage enhancement — Chorus
-	// dropped these; we keep them for first-class TokenUsage).
+	// CostUSD / DurationMs: EvTurnResult.
 	CostUSD    float64
 	DurationMs int64
 	// Usage: EvTurnResult token counts when the CLI reports them.

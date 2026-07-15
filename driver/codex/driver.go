@@ -15,7 +15,7 @@ import (
 )
 
 // version reported to the app-server in initialize.
-const clientVersion = "0.1.0"
+const clientVersion = "0.2.0"
 
 // Driver implements driver.Driver for Codex app-server. One child process
 // multiplexes all sessions owned by the Agent.
@@ -457,9 +457,9 @@ func (s *session) setBlocked(ev AppServerEvent, kind driver.BlockedKind, message
 	s.blockMu.Lock()
 	s.block = &pendingBlock{requestID: append(json.RawMessage(nil), ev.RequestID...), reason: reason}
 	s.blockMu.Unlock()
-	s.bus.Emit(driver.BlockedEvent(s.SessionID(), run, reason))
 	s.curRun.Store(ptr(""))
 	s.setState(driver.ProcessState{Phase: driver.PhaseBlocked, SessionID: s.SessionID(), RunID: run})
+	s.bus.Emit(driver.BlockedEvent(s.SessionID(), run, reason))
 }
 
 func (s *session) finishTurnDone() {

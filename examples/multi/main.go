@@ -10,6 +10,9 @@
 // Usage:
 //
 //	go run ./examples/multi
+//
+// Requires installed and authenticated Claude and Codex CLIs and consumes
+// tokens from both providers.
 package main
 
 import (
@@ -18,7 +21,6 @@ import (
 	"sync"
 
 	"github.com/Fullstop000/unio"
-	"github.com/Fullstop000/unio/driver"
 )
 
 type outcome struct {
@@ -59,7 +61,7 @@ func main() {
 	go func() { wg.Wait(); close(results) }()
 
 	// Fan in: print each answer, accumulate cross-agent token usage.
-	totals := map[string]driver.TokenUsage{}
+	totals := map[string]unio.TokenUsage{}
 	var totalCost float64
 	for o := range results {
 		if o.err != nil {

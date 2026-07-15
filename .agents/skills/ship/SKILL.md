@@ -78,13 +78,34 @@ Because `git diff` omits untracked files, inspect every path reported by `git st
 
 Add one concise, user-facing bullet under `## Unreleased` for each meaningful change. Match unio's current flat-bullet style; do not invent category headings or PR-link syntax. Skip a changelog entry only for changes with no user-facing or release-operational effect.
 
-Commit the coherent change with a conventional subject, then push and open one PR:
+`.github/pull_request_template.md` is the canonical PR-body schema. Read it
+before creating or updating a PR, then fill it with the observed state:
+
+- replace the prompt under `What changed` with the user-visible summary;
+- mark a verification checkbox only after that exact gate passes;
+- record every real E2E runtime and exact CLI version, or the explicit reason it
+  was not run;
+- select exactly one release target and name the version when applicable;
+- mark documentation, contract, changelog, compatibility, and tag-collision
+  items only when they apply and are complete; and
+- replace the compatibility placeholder with concrete risks or `None`.
+
+Do not maintain a second, skill-specific PR-body format. Extra context such as a
+regression found by CI may be added under the matching template section.
+
+Commit the coherent change with a conventional subject, then push and open one
+PR. Render a completed body from the repository template and pass it with
+`--body` or `--body-file`; do not submit the untouched template:
 
 ```bash
 git push -u origin HEAD
-gh pr create --base master --title "<concise title>" --body "<summary, verification, and E2E decision>"
+gh pr create --base master --title "<concise title>" --body-file <completed-pr-body>
 gh pr checks --watch
 ```
+
+For an existing PR, use the same completed template with `gh pr edit --body` or
+`--body-file` so later release preparation and verification do not leave the PR
+body stale.
 
 Do not claim readiness until every required check is green. If CI fails, diagnose the root cause, fix it on the same branch, rerun local gates, push, and watch again.
 

@@ -11,6 +11,8 @@ import (
 	"github.com/Fullstop000/unio/driver"
 )
 
+const clientVersion = "0.2.0"
+
 type pendingRequest struct {
 	method string
 	ch     chan rpcResponse
@@ -70,7 +72,7 @@ func (p *process) ensureStarted(ctx context.Context) error {
 	resp, err := p.call(ctx, "initialize", map[string]any{
 		"protocolVersion":    protocolVersion,
 		"clientCapabilities": map[string]any{},
-		"clientInfo":         map[string]any{"name": "unio", "title": "unio", "version": "0.1.0"},
+		"clientInfo":         map[string]any{"name": "unio", "title": "unio", "version": clientVersion},
 	})
 	if err != nil {
 		p.shutdown()

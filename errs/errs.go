@@ -1,6 +1,6 @@
-// Package errs is unio's cross-language error contract. It defines the error
-// categories and the AgentError value that every unio implementation (Go today;
-// TypeScript, Rust, … later) must expose with identical string values.
+// Package errs is unio's language-neutral error contract. It defines the error
+// categories and AgentError value exposed by the Go SDK; future implementations
+// must preserve the same string values.
 //
 // # Why a separate package / contract
 //
@@ -9,11 +9,11 @@
 // behaviour. For that to hold, the observable *contract* — error category
 // strings, event kinds, state names, wire formats — must be language-neutral and
 // frozen. Error classification is the most cross-cutting of these, so it lives
-// in its own package and is mirrored verbatim in SPEC.md.
+// in its own package and is mirrored verbatim in docs/SPEC.md.
 //
 // CONTRACT: the ErrorKind string values below are part of the cross-language
 // wire/behaviour contract. Do NOT rename or repurpose them without a spec bump;
-// TS/Rust implementations pattern-match on these exact strings.
+// Future implementations may pattern-match on these exact strings.
 package errs
 
 import "errors"
@@ -35,8 +35,7 @@ const (
 	// KindUnsupported: the operation is not supported by this driver/transport.
 	KindUnsupported ErrorKind = "unsupported"
 	// KindNotInstalled: the agent's CLI/adapter binary is not installed on this
-	// host. Surfaced at OpenSession time so a host can tell the user which
-	// executable to install rather than failing obscurely at spawn.
+	// host. Normally surfaced by unio.New during executable discovery.
 	KindNotInstalled ErrorKind = "not_installed"
 	// KindInvalidState means the requested action is not valid in the current
 	// human-observable session state.
