@@ -49,6 +49,7 @@ exclude = ["/tests"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+markers = ["e2e_real: authenticated real-runtime tests that may consume tokens"]
 
 [tool.ruff]
 target-version = "py311"

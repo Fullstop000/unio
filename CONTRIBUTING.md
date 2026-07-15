@@ -52,6 +52,8 @@ Real runtime tests are opt-in:
 
 ```sh
 go test -tags e2e_real ./tests/...
+cd python
+UNIO_RUN_REAL_E2E=1 pytest -s tests/e2e_real
 ```
 
 Run the relevant real tests when changing runtime discovery, protocols,

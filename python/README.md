@@ -148,3 +148,9 @@ Runnable examples are in
 [`python/examples/`](https://github.com/Fullstop000/unio/tree/master/python/examples).
 For local quality gates and release steps, see the [contribution
 guide](https://github.com/Fullstop000/unio/blob/master/CONTRIBUTING.md).
+
+Authenticated Codex E2E tests are opt-in because they can consume tokens:
+
+```sh
+UNIO_RUN_REAL_E2E=1 pytest -s tests/e2e_real
+```
