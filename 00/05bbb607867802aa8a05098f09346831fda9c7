@@ -1,0 +1,29 @@
+CHANGELOG.md
+  s_f365f7cae9f071::t_2cc2829159c5c5 22
+driver/acp/session.go
+  s_f365f7cae9f071::t_80cffef1269aae 405
+driver/codex/driver.go
+  s_f365f7cae9f071::t_d5c7675373d4e9 462
+driver/fake/fake.go
+  s_f365f7cae9f071::t_67ca140e00fd50 283
+driver/fake/fake_test.go
+  s_f365f7cae9f071::t_a84f4a6ff5e6ed 189-191
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "0005bbb607867802aa8a05098f09346831fda9c7",
+  "prompts": {},
+  "sessions": {
+    "s_f365f7cae9f071": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6466-eb5a-7962-b8ae-05ac2a874b03",
+        "model": "unknown"
+      },
+      "human_author": "Fullstop000 <fullstop1005@gmail.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
