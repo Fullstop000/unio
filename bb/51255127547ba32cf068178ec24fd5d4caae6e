@@ -1,0 +1,29 @@
+CONTRIBUTING.md
+  s_f365f7cae9f071::t_73d6a7a5977677 151-156
+python/CHANGELOG.md
+  s_f365f7cae9f071::t_58992e0fa3ad89 5
+python/README.md
+  s_f365f7cae9f071::t_de56f0a8bb6aa3 16,25-26
+python/pyproject.toml
+  s_f365f7cae9f071::t_85edf47915e823 6
+python/src/unio/__init__.py
+  s_f365f7cae9f071::t_01dc67e9ab658a 25
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "bb51255127547ba32cf068178ec24fd5d4caae6e",
+  "prompts": {},
+  "sessions": {
+    "s_f365f7cae9f071": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6466-eb5a-7962-b8ae-05ac2a874b03",
+        "model": "unknown"
+      },
+      "human_author": "Fullstop000 <fullstop1005@gmail.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
