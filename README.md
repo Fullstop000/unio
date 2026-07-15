@@ -135,6 +135,11 @@ go test -tags e2e_real ./tests/...
 
 Real E2E tests invoke authenticated CLIs and may consume tokens.
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development gates, runtime-test
+expectations, contract-change rules, and pull request guidance.
+
 ## License
 
 MIT

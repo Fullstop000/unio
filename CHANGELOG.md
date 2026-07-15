@@ -6,6 +6,8 @@
 
 - Added an error-handling guide covering typed categories, retry decisions,
   context cancellation, blocked turns, and interruption.
+- Added a contribution guide covering development gates, runtime testing,
+  contract changes, and pull request expectations.
 - Added a repository-local `ship` skill for reviewed PR delivery and optional tagged Go module releases.
 - Bound Agent and Session lifecycles to the context passed to `New`.
 - Simplified driver session creation by removing SDK-generated session keys and
