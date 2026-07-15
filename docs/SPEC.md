@@ -1,8 +1,8 @@
 # unio cross-language specification
 
-This specification defines the language-neutral behavior of unio. The Go SDK
-is the current implementation; future implementations must preserve the same
-observable contract even when their runtime protocols differ.
+This specification defines the language-neutral behavior shared by the Go and
+Python SDKs. Implementations preserve the same observable contract even when
+language idioms and runtime protocols differ.
 
 **Spec version: 0.6.0**
 
@@ -25,6 +25,13 @@ Runtime attach and resume are automatic. There is no public `Session.Close` or
 
 ## 2. Frozen values
 
+The machine-readable mirror used by implementation tests is
+[`contract-v0.6.json`](contract-v0.6.json). This document remains normative.
+
+### Agent kind
+
+`claude`, `codex`, `kimi`, `traex`, `opencode`
+
 ### Session state
 
 `idle`, `running`, `blocked`
@@ -43,6 +50,10 @@ Internal `turn_end` markers are never exposed by the public stream.
 
 `transport`, `protocol`, `timeout`, `runtime_reported`, `unsupported`,
 `not_installed`, `invalid_state`, `session_not_found`
+
+### Session data format
+
+`jsonl`
 
 ### Driver transport
 
@@ -69,9 +80,9 @@ availability. A missing CLI returns `not_installed`. Authentication, model,
 network, and provider errors may surface when the first runtime operation starts;
 a successful `New` does not guarantee that the CLI is authenticated.
 
-The context passed to `New` owns the Agent lifecycle. Cancelling it closes the
-Agent and every Session derived from it. Agent and Session methods do not accept
-independent operation contexts.
+Each language exposes one Agent lifecycle owner. Closing or cancelling it
+closes the Agent and every Session derived from it. A turn is interrupted with
+the Session interruption operation rather than by discarding its result.
 
 One Agent owns one concrete driver for its lifetime. Multiplexing runtimes such
 as Codex and ACP v1 agents share one child process across that Agent's sessions.
@@ -84,12 +95,12 @@ The SDK never synthesizes a replacement for the runtime's canonical ID.
 
 ### List and get session
 
-`ListSessions` returns persisted runtime metadata for the Agent's working
-directory by default. `SessionsIn(dir)` selects another working directory and
-`AllSessions()` removes the filter. `MaxSessions(n)` caps the final result when
-n is positive; a non-positive n leaves it unlimited. Drivers may page
-internally, but pagination is not part of the public SDK contract. Unsupported
-listing returns an `unsupported` error rather than an empty successful result.
+The session-listing operation returns persisted runtime metadata for the
+Agent's working directory by default. Callers can select another working
+directory, remove the filter, and apply a positive final-result limit. Drivers
+may page internally, but pagination is not part of the public SDK contract.
+Unsupported listing returns an `unsupported` error rather than an empty
+successful result.
 
 `GetSession(id)` returns the one maintained handle for that runtime ID. An
 unknown ID returns `session_not_found`. It performs no visible resume work; the
@@ -115,8 +126,8 @@ Only one turn may run per Session. A concurrent `Run`, `Stream`, or invalid
 - idle -> interrupt is an idempotent no-op.
 
 Confirmed interruption is normal control flow and sets `Result.Interrupted`.
-Failure to deliver or confirm interruption is an error. Cancelling the Agent's
-lifecycle context terminates the Agent instead of acting as a reusable
+Failure to deliver or confirm interruption is an error. Closing or cancelling
+the Agent lifecycle terminates the Agent instead of acting as a reusable
 per-turn interruption. For a manual Stream, the Session remains running until
 that Stream consumes its terminal event; a new turn is rejected before then.
 
@@ -166,12 +177,12 @@ turn runs.
 
 ## 5. Back pressure
 
-The EventBus is bounded and drop-on-full so one slow subscriber cannot block a
-runtime reader. A terminal `blocked`, `completed`, or `failed` event evicts one
-older buffered event rather than being dropped itself. The driver EventBus
-exposes a dropped-event counter. The top-level `Stream` does not currently
-expose that counter, so callers must not assume every intermediate event is
-delivered to a slow consumer. Producers never send on a closed channel.
+The internal driver event queue is bounded and drop-on-full so one slow
+subscriber cannot block a runtime reader. A terminal `blocked`, `completed`, or
+`failed` event evicts one older buffered event rather than being dropped itself.
+Driver APIs expose a dropped-event counter where supported. The public `Stream`
+does not expose that counter, so callers must not assume every intermediate
+event is delivered to a slow consumer. Producers never send to a closed queue.
 
 ## 6. Versioning
 

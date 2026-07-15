@@ -1,7 +1,15 @@
 # unio
 
-Go SDK for using Claude Code, Codex, and ACP-native coding agents through one
-human-aligned API.
+One API for using Claude Code, Codex, and ACP-native coding agents.
+
+- [Go SDK](#go-sdk) — module releases use tags such as `v0.2.0`.
+- [Python SDK](python/README.md) — package releases use tags such as
+  `python-v0.1.0`.
+
+Both implementations follow the shared [behavior specification](docs/SPEC.md),
+while package versions evolve independently.
+
+## Go SDK
 
 unio v0.2 requires Go 1.23 or newer. The supported caller-facing packages are
 the root `unio` package and `errs`; packages under `driver` are pre-1.0 adapter

@@ -2,10 +2,11 @@
 
 ## Supported versions
 
-| Version | Security support |
-| --- | --- |
-| v0.2.x | Supported |
-| v0.1.x | Not supported |
+| SDK | Version | Security support |
+| --- | --- | --- |
+| Go | v0.2.x | Supported |
+| Go | v0.1.x | Not supported |
+| Python | 0.1.x | Supported after its first release |
 
 ## Report a vulnerability
 

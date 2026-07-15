@@ -1,9 +1,9 @@
 # unio SDK Feature Support Matrix
 
-This document records runtime-specific support in unio v0.2. A ✅ means the SDK
-implements the mapping; upstream CLI capabilities can still vary by version and
-configuration. ACP session discovery and resume are explicitly capability-
-negotiated and therefore marked ⚠️.
+This document records runtime-specific support in Go v0.2 and Python v0.1. A ✅
+means both SDKs implement the mapping; upstream CLI capabilities can still vary
+by version and configuration. ACP session discovery and resume are explicitly
+capability-negotiated and therefore marked ⚠️.
 
 ## Release compatibility evidence
 
@@ -11,6 +11,12 @@ The minimum Go version is 1.23. On 2026-07-15, CI passed on
 `ubuntu-latest`, and the v0.2 release candidate passed the local race suite on
 macOS arm64 with Go 1.23.2. Native Windows has not been verified; treat it as
 unsupported until a release gate covers it.
+
+The Python implementation supports Python 3.11–3.14. On 2026-07-15, its
+deterministic protocol suite, strict type check, package build, metadata check,
+and clean-wheel import passed locally on macOS arm64 with Python 3.12.13. No
+Python real-runtime E2E has been run yet, so the runtime statuses below remain
+experimental for Python even where the Go adapter has stronger evidence.
 
 | Agent | Executable discovery | Evidence on 2026-07-15 | Status |
 | --- | --- | --- | --- |

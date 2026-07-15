@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added a machine-readable cross-language contract checked by Go and Python.
+
 ## v0.2.0 - 2026-07-15
 
 - Added documentation for onboarding, runtime compatibility, errors, security,

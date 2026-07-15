@@ -1,0 +1,13 @@
+{
+  "spec_version": "0.6.0",
+  "agent_kind": ["claude", "codex", "kimi", "traex", "opencode"],
+  "session_state": ["idle", "running", "blocked"],
+  "blocked_kind": ["user_input", "tool_approval", "permission", "authentication", "external"],
+  "event_kind": ["thinking", "text", "tool_call", "tool_result"],
+  "error_kind": ["transport", "protocol", "timeout", "runtime_reported", "unsupported", "not_installed", "invalid_state", "session_not_found"],
+  "session_data_format": ["jsonl"],
+  "driver_transport": ["fake", "acp_native", "codex_app_server", "claude_stream_json"],
+  "driver_lifecycle": ["idle", "starting", "active", "prompt_in_flight", "blocked", "closed", "failed"],
+  "driver_event_type": ["lifecycle", "session_attached", "output", "blocked", "completed", "failed"],
+  "finish_reason": ["natural", "cancelled", "transport_closed"]
+}

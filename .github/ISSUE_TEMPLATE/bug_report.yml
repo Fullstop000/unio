@@ -10,14 +10,14 @@ body:
     id: unio-version
     attributes:
       label: unio version
-      placeholder: v0.2.0 or commit SHA
+      placeholder: Go v0.2.0, Python 0.1.0, or commit SHA
     validations:
       required: true
   - type: input
     id: environment
     attributes:
-      label: Go, OS, and architecture
-      placeholder: Go 1.23.2, macOS 15, arm64
+      label: Language runtime, OS, and architecture
+      placeholder: Python 3.12.13, macOS 15, arm64
     validations:
       required: true
   - type: input

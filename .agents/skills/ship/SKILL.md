@@ -1,13 +1,16 @@
 ---
 name: ship
-description: "Ship unio changes through a reviewed GitHub PR, or cut a tagged Go module release after merge. Use when asked to ship, land, merge, release, cut a version, or publish unio."
+description: "Ship unio changes through a reviewed GitHub PR, or cut a tagged Go or Python SDK release after merge. Use when asked to ship, land, merge, release, cut a version, or publish unio."
 ---
 
 # Ship unio
 
-Land one branch through one PR to `master`. Optionally turn the merged result into a SemVer-tagged Go module release.
+Land one branch through one PR to `master`. Optionally turn the merged result
+into a tagged Go module release or a PyPI Python release.
 
-unio has no version file and no binary Release workflow. The latest `vX.Y.Z` Git tag is the released version; `CHANGELOG.md` holds pending entries under `## Unreleased`.
+Go uses `vX.Y.Z` tags and the root `CHANGELOG.md`. Python uses the version in
+`python/pyproject.toml`, `python-vX.Y.Z` tags, `python/CHANGELOG.md`, and the
+Trusted Publishing workflow in `.github/workflows/python-release.yml`.
 
 ## Rules
 
@@ -19,6 +22,8 @@ unio has no version file and no binary Release workflow. The latest `vX.Y.Z` Git
 - Stop on a failed gate, secret hit, unresolved review finding, or red CI. Fix the cause and rerun the affected gates.
 - Preserve unrelated user changes. Do not stash, discard, or include them without permission.
 - Tag the exact commit merged into `origin/master`, never the pre-merge branch tip.
+- Never treat a Go version as a Python version (or vice versa); identify the
+  release target before editing metadata.
 
 ## 1. Establish scope and state
 
@@ -49,6 +54,19 @@ go vet ./...
 go test -race ./...
 ```
 
+When `python/` or the shared contract changes, also run:
+
+```bash
+cd python
+python -m pip install -e '.[dev]'
+ruff format --check .
+ruff check .
+pyright
+pytest
+python -m build
+twine check dist/*
+```
+
 New or changed behavior needs tests that prove the user-visible outcome, not merely coverage. `go test -race ./...` also compiles the packages and examples; do not add a redundant build gate without a concrete need.
 
 Real E2E tests invoke authenticated agent CLIs and may consume tokens:
@@ -76,7 +94,11 @@ Because `git diff` omits untracked files, inspect every path reported by `git st
 
 ## 4. Prepare the changelog and PR
 
-Add one concise, user-facing bullet under `## Unreleased` for each meaningful change. Match unio's current flat-bullet style; do not invent category headings or PR-link syntax. Skip a changelog entry only for changes with no user-facing or release-operational effect.
+Add one concise, user-facing bullet under `## Unreleased` for each meaningful
+change: use root `CHANGELOG.md` for Go/shared changes and
+`python/CHANGELOG.md` for Python package changes. Match the current flat-bullet
+style; do not invent category headings or PR-link syntax. Skip a changelog entry
+only for changes with no user-facing or release-operational effect.
 
 `.github/pull_request_template.md` is the canonical PR-body schema. Read it
 before creating or updating a PR, then fill it with the observed state:
@@ -113,12 +135,16 @@ Do not claim readiness until every required check is green. If CI fails, diagnos
 
 Skip this question only when the user already explicitly requested either PR-only shipping or a release.
 
-Find the latest release and inspect all commits since it:
+Find the latest release for the requested SDK and inspect all commits since it.
+For Go:
 
 ```bash
 last_tag=$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || true)
 git log "${last_tag:+$last_tag..}HEAD" --pretty='%h %s'
 ```
+
+For Python, use `python-v[0-9]*` instead and inspect `python/CHANGELOG.md` and
+`python/pyproject.toml`.
 
 Suggest the next SemVer version from the aggregate release contents, not only the current commit:
 
@@ -132,7 +158,7 @@ Ask with the exact suggestion: “PR is green. Keep these entries under `Unrelea
 
 Leave the entries under `## Unreleased`. Do not create or change a version elsewhere; unio has no such file.
 
-### Release
+### Go release
 
 Before merge, verify the requested tag does not exist locally or remotely. Edit only `CHANGELOG.md` for release metadata:
 
@@ -149,6 +175,14 @@ Both commands must report no existing tag. Then edit the changelog:
 
 Commit this on the same PR as `chore(release): prepare vX.Y.Z`, push, rerun the local gates affected by the edit, and reconfirm CI is green. The changelog heading does not make a release; the post-merge tag does.
 
+### Python release
+
+Verify `python-vX.Y.Z` is absent locally and remotely. Set the exact version in
+`python/pyproject.toml`, keep a new `## Unreleased` section, and move pending
+entries to `## X.Y.Z - YYYY-MM-DD` in `python/CHANGELOG.md`. Confirm the PyPI
+pending Trusted Publisher and protected GitHub `pypi` environment exist before
+merge. Commit release preparation on the same PR and rerun all Python gates.
+
 ## 6. Obtain merge approval
 
 Report the exact state and wait for explicit approval:
@@ -156,7 +190,8 @@ Report the exact state and wait for explicit approval:
 - PR URL and green checks;
 - local gates and whether real E2E ran;
 - unresolved risks, if any;
-- either “entries remain under `Unreleased`” or “prepared `vX.Y.Z`”.
+- either “entries remain under `Unreleased`” or the exact prepared Go/Python
+  release tag.
 
 Ask for explicit squash-merge approval. After approval, run:
 
@@ -170,7 +205,8 @@ Do not use `--merge`, `--rebase`, or `--auto`. Avoid `--delete-branch`: unio is 
 
 For PR-only shipping, stop after confirming the merge landed on `origin/master`.
 
-For a release, fetch and resolve the merge commit from GitHub rather than assuming the local branch commit is releasable:
+For a release, fetch and resolve the merge commit from GitHub rather than
+assuming the local branch commit is releasable. For Go:
 
 ```bash
 git fetch origin master --tags
@@ -195,6 +231,13 @@ go list -m github.com/Fullstop000/unio@vX.Y.Z
 ```
 
 The Go proxy can lag briefly; retry verification, but never move or recreate a published tag. Report the tag URL and be honest if proxy verification is still pending. Do not create a GitHub Release or binaries unless the user separately requests them; the repository currently publishes neither.
+
+For Python, resolve and verify the squash merge identically, then confirm the
+merged `python/pyproject.toml` version and dated changelog heading. After
+explicit tag approval, create and push annotated `python-vX.Y.Z` on that merge
+commit. Watch `.github/workflows/python-release.yml` through the publish job and
+verify the PyPI project reports the new version. Never upload manually, reuse a
+TestPyPI artifact, or move a tag after the workflow starts.
 
 ## Failure boundaries
 

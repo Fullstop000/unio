@@ -12,6 +12,20 @@ go.work.sum
 # Coverage
 *.cov
 coverage.txt
+.coverage
+htmlcov/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pyright/
+.venv/
+dist/
+build/
+*.egg-info/
 
 # Editor / OS
 .DS_Store

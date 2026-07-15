@@ -1,8 +1,24 @@
 # Error handling
 
-unio returns typed SDK errors from `github.com/Fullstop000/unio/errs`. Match an
-error by its `ErrorKind`; error messages contain runtime-specific diagnostic
-details and are not a stable API.
+unio returns typed SDK errors in every language. Match an error by its
+`ErrorKind`; error messages contain runtime-specific diagnostic details and are
+not a stable API.
+
+Python:
+
+```python
+try:
+    result = await session.run("Explain this repository")
+except unio.AgentError as error:
+    if error.kind is unio.ErrorKind.NOT_INSTALLED:
+        print("Install the selected agent CLI")
+    elif error.kind is unio.ErrorKind.UNSUPPORTED:
+        print("Choose a supported runtime or operation")
+    else:
+        print(f"agent failed ({error.kind}): {error.message}")
+```
+
+Go:
 
 ```go
 result, err := session.Run("Explain this repository")
@@ -47,6 +63,10 @@ system if prompts, paths, command output, or credentials may be sensitive.
 
 ## Where errors surface
 
+The operation names below use Go spelling; Python exposes the same operations
+as `Agent(...)`, `list_sessions`, `get_session`, `new_session`, `run`, `stream`,
+`interrupt`, `continue_`, `raw`, and `token_statistics`.
+
 | Operation | Typical failures |
 | --- | --- |
 | `unio.New` | A cancelled parent context, unknown Agent kind, or `not_installed`. `New` currently verifies executable discovery; authentication and model errors may surface on the first runtime operation. |
@@ -62,6 +82,13 @@ The context passed to `unio.New` owns the entire Agent lifecycle. Cancelling it
 can make an in-flight operation return `context.Canceled` or
 `context.DeadlineExceeded`; these are standard Go context errors, not unio
 `ErrorKind` values. Check them with `errors.Is` before calling `errs.KindOf`.
+
+In Python, `asyncio.CancelledError` remains normal asyncio cancellation rather
+than an `AgentError`; cancelling a task while it consumes a Stream asks the
+runtime to interrupt that turn. An invalid `AgentKind` string raises
+`ValueError`. `Agent.close()` can raise `ExceptionGroup` when multiple Session
+cleanups fail. Use `unio.kind_of(error)` to find a nested `AgentError` category
+when an exception has been chained.
 
 ## Normal control flow is not an error
 
@@ -111,3 +138,6 @@ if errors.Is(err, unio.ErrInvalidState) {
 ```
 
 Wrapping an error with `%w` preserves all of these matching behaviors.
+
+Python exception chaining with `raise ... from error` is likewise understood by
+`unio.kind_of`.
