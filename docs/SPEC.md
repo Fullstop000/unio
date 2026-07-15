@@ -1,8 +1,8 @@
 # unio cross-language specification
 
-unio is a multi-language SDK family. Every implementation must expose the same
-human-aligned behavior even though Claude Code and Codex use different runtime
-protocols.
+This specification defines the language-neutral behavior of unio. The Go SDK
+is the current implementation; future implementations must preserve the same
+observable contract even when their runtime protocols differ.
 
 **Spec version: 0.6.0**
 
@@ -64,9 +64,10 @@ Internal `turn_end` markers are never exposed by the public stream.
 
 ### Agent initialization
 
-Creating an Agent resolves the concrete runtime and probes availability. A
-missing CLI returns `not_installed`; an unavailable authentication state returns
-an error rather than a half-initialized Agent.
+Creating an Agent resolves the concrete runtime and probes executable
+availability. A missing CLI returns `not_installed`. Authentication, model,
+network, and provider errors may surface when the first runtime operation starts;
+a successful `New` does not guarantee that the CLI is authenticated.
 
 The context passed to `New` owns the Agent lifecycle. Cancelling it closes the
 Agent and every Session derived from it. Agent and Session methods do not accept
@@ -167,8 +168,10 @@ turn runs.
 
 The EventBus is bounded and drop-on-full so one slow subscriber cannot block a
 runtime reader. A terminal `blocked`, `completed`, or `failed` event evicts one
-older buffered event rather than being dropped itself. Implementations expose a
-dropped-event counter. Producers never send on a closed channel.
+older buffered event rather than being dropped itself. The driver EventBus
+exposes a dropped-event counter. The top-level `Stream` does not currently
+expose that counter, so callers must not assume every intermediate event is
+delivered to a slow consumer. Producers never send on a closed channel.
 
 ## 6. Versioning
 

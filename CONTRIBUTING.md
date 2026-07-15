@@ -55,13 +55,15 @@ If real tests were not run, say so explicitly and explain why.
 
 ### Cross-language contract
 
-`SPEC.md` is the normative behavior contract. Changing a frozen state, event,
+`docs/SPEC.md` is the normative behavior contract. Changing a frozen state, event,
 blocked reason, error kind, data format, or other observable behavior requires:
 
 - a specification version bump;
 - matching implementation and tests;
 - an update to `docs/API_SUPPORT.md` when runtime support differs; and
-- a migration note when existing callers must change.
+- a clear compatibility note in the pull request and changelog when existing
+  callers must change. A dedicated migration document is added only when the
+  maintainers decide to support that upgrade path.
 
 Do not change a frozen string value only to make its Go name look cleaner.
 
@@ -77,6 +79,8 @@ Do not change a frozen string value only to make its Go name look cleaner.
 
 - Prefer links to the source of truth over copying behavior tables.
 - Keep `README.md` focused on the first successful user journey.
+- Keep [docs/README.md](docs/README.md) as the documentation index and stability
+  boundary.
 - Keep `docs/API_SUPPORT.md` focused on runtime capability differences.
 - Keep Go-specific parameter, field, zero-value, and error semantics in GoDoc.
 - Use [docs/ERRORS.md](docs/ERRORS.md) for caller-facing error guidance.

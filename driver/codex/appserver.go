@@ -6,10 +6,8 @@
 // format OMITS the `"jsonrpc":"2.0"` header (unlike ACP); the parser tolerates
 // its presence for defensive compatibility.
 //
-// This file is the STATELESS codec: pure build/parse, no process, no channels,
-// no state. It mirrors Chorus's codex_app_server.rs so both implementations
-// decode the same bytes, and additionally surfaces thread/tokenUsage so unio can
-// populate first-class TokenUsage (which Chorus dropped).
+// This file is the stateless codec: pure build/parse with no process, channel,
+// or session state. It surfaces thread/tokenUsage as first-class TokenUsage.
 package codex
 
 import "encoding/json"
@@ -78,8 +76,8 @@ type Item struct {
 	Arguments any    // mcpToolCall (decoded)
 }
 
-// AppServerEvent is a parsed line (struct+tag form of the Rust enum). Only the
-// fields relevant to Type are populated.
+// AppServerEvent is one parsed app-server line. Only fields relevant to Type
+// are populated.
 type AppServerEvent struct {
 	Type AppServerEventType
 

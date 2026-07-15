@@ -1,0 +1,48 @@
+name: Bug report
+description: Report a reproducible unio SDK or runtime compatibility problem.
+title: "bug: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Do not include credentials or unredacted session data. Report security issues through SECURITY.md.
+  - type: input
+    id: unio-version
+    attributes:
+      label: unio version
+      placeholder: v0.2.0 or commit SHA
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Go, OS, and architecture
+      placeholder: Go 1.23.2, macOS 15, arm64
+    validations:
+      required: true
+  - type: input
+    id: runtime
+    attributes:
+      label: Agent and CLI version
+      placeholder: Codex, codex-cli 0.144.2
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Include the operation, Session state, sanitized error kind/message, and minimal code or fixture.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true

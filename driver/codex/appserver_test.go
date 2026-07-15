@@ -13,7 +13,7 @@ func noMethod(uint64) (string, bool) { return "", false }
 
 func TestBuildInitializeNoJSONRPC(t *testing.T) {
 	var v map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(BuildInitialize(0, "0.1.0")), &v); err != nil {
+	if err := json.Unmarshal([]byte(BuildInitialize(0, "test-version")), &v); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := v["jsonrpc"]; ok {

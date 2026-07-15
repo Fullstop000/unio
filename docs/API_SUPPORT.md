@@ -1,14 +1,38 @@
 # unio SDK Feature Support Matrix
 
+This document records runtime-specific support in unio v0.2. A ✅ means the SDK
+implements the mapping; upstream CLI capabilities can still vary by version and
+configuration. ACP session discovery and resume are explicitly capability-
+negotiated and therefore marked ⚠️.
+
+## Release compatibility evidence
+
+The minimum Go version is 1.23. On 2026-07-15, CI passed on
+`ubuntu-latest`, and the v0.2 release candidate passed the local race suite on
+macOS arm64 with Go 1.23.2. Native Windows has not been verified; treat it as
+unsupported until a release gate covers it.
+
+| Agent | Executable discovery | Evidence on 2026-07-15 | Status |
+| --- | --- | --- | --- |
+| Claude Code | `claude` | Real E2E exists but was not run in the release environment | Experimental compatibility |
+| Codex | `codex` | CLI 0.144.2 detected on macOS arm64; real E2E pending explicit token approval | Release candidate |
+| Kimi | `kimi-cli`, `kimi` | Not installed in the release environment | Experimental compatibility |
+| TraeX | `traex`, `trae-cli`, `coco`, `traecli` | Not installed in the release environment | Experimental compatibility |
+| OpenCode | `opencode` | Not installed in the release environment | Experimental compatibility |
+
+"Experimental compatibility" means the adapter and deterministic protocol
+tests are present, but this release has no claim of live compatibility with a
+specific CLI version. Report the exact CLI version with compatibility issues.
+
 ## Support Overview
 
 | Agent | Execution | Session Listing | Session Resume | Interruption | Blocking | Tool Results | Turn Usage | Raw Session Data | Session Token Statistics |
 | --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 | Claude Code | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ Includes cache writes, cost, and duration | ✅ JSONL | ✅ |
 | Codex | ✅ | ✅ | ✅ | ✅ | ⚠️ Approvals only | ⚠️ Command output only | ⚠️ No cache writes, cost, or duration | ✅ JSONL | ✅ |
-| Kimi | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ JSONL | ✅ |
-| TraeX | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ JSONL | ✅ |
-| OpenCode | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ |
+| Kimi | ✅ | ⚠️ Runtime capability | ⚠️ Runtime capability | ✅ | ✅ | ✅ | ❌ | ✅ JSONL | ✅ |
+| TraeX | ✅ | ⚠️ Runtime capability | ⚠️ Runtime capability | ✅ | ✅ | ✅ | ❌ | ✅ JSONL | ✅ |
+| OpenCode | ✅ | ⚠️ Runtime capability | ⚠️ Runtime capability | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ |
 
 | Marker | Meaning |
 | --- | --- |
@@ -28,15 +52,15 @@
 | `agent.configure.runtime_arguments` | ✅ | ❌ | ✅ | ✅ | ✅ | Codex app-server arguments are fixed |
 | `agent.configure.environment` | ✅ | ✅ | ✅ | ✅ | ✅ |  |
 
-## Agent Lifecycle
+## Session Discovery
 
 | Feature | Claude Code | Codex | Kimi | TraeX | OpenCode | Notes |
 | --- | :---: | :---: | :---: | :---: | :---: | --- |
 | `session.create` | ✅ | ✅ | ✅ | ✅ | ✅ |  |
-| `session.list` | ✅ | ✅ | ✅ | ✅ | ✅ |  |
-| `session.list.workspace` | ✅ | ✅ | ✅ | ✅ | ✅ | Filters sessions by working directory |
-| `session.list.all` | ✅ | ✅ | ✅ | ✅ | ✅ | Removes the working-directory filter |
-| `session.retrieve` | ✅ | ✅ | ✅ | ✅ | ✅ |  |
+| `session.list` | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ | ACP requires the runtime to advertise `session/list` |
+| `session.list.workspace` | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ | Filters sessions by working directory when listing is advertised |
+| `session.list.all` | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ | Removes the working-directory filter when listing is advertised |
+| `session.retrieve` | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ | ACP requires `session/resume` or `session/load` |
 | `agent.close` | ✅ | ✅ | ✅ | ✅ | ✅ |  |
 
 ## Session Lifecycle
@@ -129,14 +153,8 @@
 | `blocking.authentication` | ❌ | ❌ | ❌ | ❌ | ❌ |
 | `blocking.external` | ❌ | ❌ | ❌ | ❌ | ❌ |
 
-## Cross-Language Contracts
+## Related contracts
 
-- Agent kinds: `Claude`, `Codex`, `Kimi`, `TraeX`, `OpenCode`
-- Session states: `idle`, `running`, `blocked`
-- Event kinds: `thinking`, `text`, `tool_call`, `tool_result`
-- Blocking reasons: `user_input`, `tool_approval`, `permission`, `authentication`, `external`
-- Error kinds: `transport`, `protocol`, `timeout`, `runtime_reported`, `unsupported`, `not_installed`, `invalid_state`, `session_not_found`
-- Session data formats: `jsonl`
-
-See [ERRORS.md](ERRORS.md) for error meanings, matching examples, and caller
-recovery guidance.
+The frozen cross-language values live only in the [behavior
+specification](SPEC.md). See [ERRORS.md](ERRORS.md) for error meanings, matching
+examples, and caller recovery guidance.

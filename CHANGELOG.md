@@ -4,17 +4,16 @@
 
 ## v0.2.0 - 2026-07-15
 
-- Added an error-handling guide covering typed categories, retry decisions,
-  context cancellation, blocked turns, and interruption.
-- Added a contribution guide covering development gates, runtime testing,
-  contract changes, and pull request expectations.
-- Added a repository-local `ship` skill for reviewed PR delivery and optional tagged Go module releases.
+- Added documentation for onboarding, runtime compatibility, errors, security,
+  contribution, and the v0.2 stability boundary.
 - Bound Agent and Session lifecycles to the context passed to `New`.
 - Simplified driver session creation by removing SDK-generated session keys and
   per-open Agent configuration.
 - Added `Session.Raw` for persisted Claude Code, Codex, Kimi, and TraeX session data.
 - Added `Session.TokenStatistics` for cumulative Claude Code, Codex, Kimi, and TraeX session usage.
 - Distinguished per-turn `Result.Usage` from persisted session statistics.
+- Exposed `TokenUsage` from the root package so callers need not import a
+  runtime driver package.
 - You can now use `MaxSessions` to cap results returned by `Agent.ListSessions`.
 - Replaced package-level `Run`/`Start` with long-lived `Agent` instances.
 - Added `NewSession`, `ListSessions`, and `GetSession` with automatic resume.

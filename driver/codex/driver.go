@@ -15,7 +15,7 @@ import (
 )
 
 // version reported to the app-server in initialize.
-const clientVersion = "0.1.0"
+const clientVersion = "0.2.0"
 
 // Driver implements driver.Driver for Codex app-server. One child process
 // multiplexes all sessions owned by the Agent.

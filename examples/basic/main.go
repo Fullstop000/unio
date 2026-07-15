@@ -1,5 +1,5 @@
-// Command basic is the smallest runnable unio example: send one prompt to an
-// agent and print the answer + token usage. One call does it all.
+// Command basic is the smallest runnable unio example: create an Agent and
+// Session, send one prompt, and print the answer plus token usage.
 //
 //	go run ./examples/basic
 //
@@ -15,8 +15,6 @@ import (
 )
 
 func main() {
-	// The whole interaction: one call. unio handles spawn, session id,
-	// subscription, the event loop, and completion.
 	agent, err := unio.New(context.Background(), unio.Claude)
 	if err != nil {
 		log.Fatal(err)

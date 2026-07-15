@@ -33,8 +33,8 @@ func (p *process) readerLoop() {
 // dispatch parses one line and routes it.
 func (p *process) dispatch(line string) {
 	ev := ParseLine(line, func(id uint64) (string, bool) {
-		// Consult AND remove the pending entry so the error path also clears it
-		// (mirrors Chorus). We resolve the waiter here after classification.
+		// Consult and remove the pending entry so the error path also clears it.
+		// The waiter is resolved here after classification.
 		p.mu.Lock()
 		pend, ok := p.pendingReqs[id]
 		p.mu.Unlock()

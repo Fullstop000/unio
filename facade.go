@@ -1,4 +1,6 @@
 // Package unio exposes a small, human-aligned API for using coding agents.
+// An Agent owns one configured runtime, Sessions own conversations, and Streams
+// expose the live events of one turn.
 package unio
 
 import (
@@ -35,72 +37,112 @@ const (
 type SessionState string
 
 const (
-	Idle    SessionState = "idle"
+	// Idle means the Session has no active or blocked turn.
+	Idle SessionState = "idle"
+	// Running means one turn is currently in flight.
 	Running SessionState = "running"
+	// Blocked means the runtime is waiting for caller input or approval.
 	Blocked SessionState = "blocked"
 )
 
+// BlockedKind identifies why a turn needs external intervention.
 type BlockedKind = driver.BlockedKind
+
+// BlockOption is one runtime-advertised response to a blocked turn.
 type BlockOption = driver.BlockOption
+
+// BlockedReason describes why a turn blocked and any advertised responses.
 type BlockedReason = driver.BlockedReason
 
 const (
-	BlockedUserInput      = driver.BlockedUserInput
-	BlockedToolApproval   = driver.BlockedToolApproval
-	BlockedPermission     = driver.BlockedPermission
+	// BlockedUserInput requests free-form user input.
+	BlockedUserInput = driver.BlockedUserInput
+	// BlockedToolApproval requests approval for a tool call.
+	BlockedToolApproval = driver.BlockedToolApproval
+	// BlockedPermission requests a runtime permission decision.
+	BlockedPermission = driver.BlockedPermission
+	// BlockedAuthentication requests an authentication action.
 	BlockedAuthentication = driver.BlockedAuthentication
-	BlockedExternal       = driver.BlockedExternal
+	// BlockedExternal requests another runtime-defined external action.
+	BlockedExternal = driver.BlockedExternal
 )
 
 // EventKind classifies streamed output.
 type EventKind string
 
 const (
-	KindThinking   EventKind = "thinking"
-	KindText       EventKind = "text"
-	KindToolCall   EventKind = "tool_call"
+	// KindThinking carries model reasoning text when the runtime exposes it.
+	KindThinking EventKind = "thinking"
+	// KindText carries assistant-visible text.
+	KindText EventKind = "text"
+	// KindToolCall carries a tool name and decoded input.
+	KindToolCall EventKind = "tool_call"
+	// KindToolResult carries runtime tool-result text.
 	KindToolResult EventKind = "tool_result"
 )
 
 // Event is one streamed item.
 type Event struct {
-	Kind      EventKind
-	Text      string
-	Tool      string
+	// Kind selects which remaining fields are meaningful.
+	Kind EventKind
+	// Text is set for thinking, text, and tool-result events.
+	Text string
+	// Tool is set for tool-call events.
+	Tool string
+	// ToolInput is the runtime-decoded value for a tool-call event.
 	ToolInput any
 }
 
 // ToolCall records one tool invocation observed during a turn.
 type ToolCall struct {
-	Name  string
+	// Name is the runtime-reported tool name.
+	Name string
+	// Input is the decoded runtime tool input.
 	Input any
 }
 
 // Result is the accumulated result of Run, Stream, or Continue.
 type Result struct {
-	Text        string
-	Thinking    string
-	ToolCalls   []ToolCall
-	SessionID   string
-	Usage       map[string]driver.TokenUsage
-	DurationMs  int64
+	// Text is all assistant-visible text accumulated before termination.
+	Text string
+	// Thinking is all exposed reasoning text accumulated before termination.
+	Thinking string
+	// ToolCalls contains observed calls; tool-result content remains stream-only.
+	ToolCalls []ToolCall
+	// SessionID is the runtime-owned conversation ID.
+	SessionID string
+	// Usage describes this turn and is keyed by runtime-reported model name.
+	Usage map[string]TokenUsage
+	// DurationMs is zero when the runtime does not report a duration.
+	DurationMs int64
+	// Interrupted reports a confirmed caller interruption.
 	Interrupted bool
-	Blocked     *BlockedReason
+	// Blocked is non-nil when the turn needs external intervention.
+	Blocked *BlockedReason
 }
+
+// TokenUsage describes token consumption for one model in one completed turn.
+type TokenUsage = driver.TokenUsage
 
 // TokenStatistics is cumulative token usage read from persisted session data.
 // It is independent of Result.Usage, which describes one turn only.
 type TokenStatistics struct {
-	InputTokens      int64
-	OutputTokens     int64
-	CacheReadTokens  int64
+	// InputTokens includes cached input tokens.
+	InputTokens int64
+	// OutputTokens is the cumulative generated-token count.
+	OutputTokens int64
+	// CacheReadTokens is the cached-input subset when persisted by the runtime.
+	CacheReadTokens int64
+	// CacheWriteTokens is the cache-write count when persisted by the runtime.
 	CacheWriteTokens int64
-	CostUSD          float64
+	// CostUSD is zero because supported persisted session formats omit cost.
+	CostUSD float64
 }
 
 // SessionDataFormat identifies a raw persisted session representation.
 type SessionDataFormat = driver.SessionDataFormat
 
+// SessionDataJSONL identifies newline-delimited runtime session JSON.
 const SessionDataJSONL = driver.SessionDataJSONL
 
 // RawSessionData is the runtime-owned persisted representation of one session.
@@ -108,11 +150,17 @@ type RawSessionData = driver.RawSessionData
 
 // SessionInfo is persisted conversation metadata returned by ListSessions.
 type SessionInfo struct {
-	ID           string
-	Title        string
-	Cwd          string
-	StartedAt    time.Time
-	UpdatedAt    time.Time
+	// ID is the runtime-owned session ID.
+	ID string
+	// Title is best-effort and may be empty.
+	Title string
+	// Cwd is the recorded working directory and may be empty.
+	Cwd string
+	// StartedAt is best-effort and may be the zero time.
+	StartedAt time.Time
+	// UpdatedAt is best-effort and may be the zero time.
+	UpdatedAt time.Time
+	// MessageCount is runtime-provided and may be zero when unavailable.
 	MessageCount int
 }
 
@@ -145,7 +193,8 @@ func AllSessions() ListSessionsOption {
 	}
 }
 
-// MaxSessions returns at most n conversations. A non-positive n means no limit.
+// MaxSessions returns at most n conversations in runtime-defined order. A
+// non-positive n means no limit.
 func MaxSessions(n int) ListSessionsOption {
 	return func(c *listSessionsConfig) {
 		c.limit = n
@@ -153,7 +202,9 @@ func MaxSessions(n int) ListSessionsOption {
 }
 
 var (
-	ErrInvalidState    = errs.New(errs.KindInvalidState, "")
+	// ErrInvalidState matches errors for operations invalid in the current state.
+	ErrInvalidState = errs.New(errs.KindInvalidState, "")
+	// ErrSessionNotFound matches errors for unknown runtime-owned session IDs.
 	ErrSessionNotFound = errs.New(errs.KindSessionNotFound, "")
 )
 
@@ -168,14 +219,28 @@ type config struct {
 // Option configures an Agent instance.
 type Option func(*config)
 
-func WithCwd(dir string) Option     { return func(c *config) { c.cwd = dir } }
+// WithCwd selects the Agent working directory. An empty value uses the current
+// process directory. It does not sandbox runtime file access.
+func WithCwd(dir string) Option { return func(c *config) { c.cwd = dir } }
+
+// WithModel selects a runtime-specific model name. The runtime validates it
+// when an operation starts.
 func WithModel(model string) Option { return func(c *config) { c.model = model } }
+
+// WithSystemPrompt supplies standing instructions. ACP agents prepend them to
+// the first user prompt; other drivers use their native instruction channel.
 func WithSystemPrompt(prompt string) Option {
 	return func(c *config) { c.systemPrompt = prompt }
 }
+
+// WithExtraArgs appends runtime-specific CLI arguments. Codex app-server
+// arguments are fixed and ignore this option.
 func WithExtraArgs(args ...string) Option {
 	return func(c *config) { c.extraArgs = append(c.extraArgs, args...) }
 }
+
+// WithEnv appends child-process environment entries in KEY=VALUE form. Callers
+// should avoid duplicate keys because their interpretation is platform-specific.
 func WithEnv(env ...string) Option {
 	return func(c *config) { c.env = append(c.env, env...) }
 }

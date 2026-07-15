@@ -1,8 +1,7 @@
 package driver
 
-// EventType tags a top-level AgentEvent. The event model is deliberately flat
-// (struct + string tag) rather than a Rust-style enum-with-payload, so events
-// serialise cleanly and a single envelope covers every transport.
+// EventType tags a top-level AgentEvent. The flat envelope serialises cleanly
+// and covers every transport.
 type EventType string
 
 const (
@@ -51,9 +50,8 @@ type AgentEventItem struct {
 	ToolInput any
 }
 
-// AgentEvent is the unified event published on a Session's EventBus. It is the
-// flattened union of Chorus's DriverEvent variants: Type selects which fields
-// are meaningful.
+// AgentEvent is the unified event published on a Session's EventBus. Type
+// selects which fields are meaningful.
 //
 //   - EventLifecycle       → State
 //   - EventSessionAttached → SessionID

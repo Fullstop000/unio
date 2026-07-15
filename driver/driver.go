@@ -2,23 +2,9 @@
 // drive heterogeneous coding agents (Claude Code, Codex, ACP-native agents such
 // as Trae/Kimi/OpenCode, …) behind one interface.
 //
-// This package is the pure abstraction leaf. It depends only on the Go standard
-// library plus a UUID helper — never on any host application (niva or otherwise)
-// and never on a concrete transport. Concrete transports live in sub-packages
-// (driver/codex, driver/claude) and the in-memory test double lives in
-// driver/fake.
-//
-// # Design philosophy (ported from Chorus)
-//
-//   - Abstraction vs. glue are physically separated: this package holds only
-//     interfaces and plain-data types. Process handling, protocol I/O, and host
-//     wiring live elsewhere.
-//   - Enums-with-payload from the Rust original become struct + string type-tag
-//     here, which is idiomatic Go and keeps the event envelope flat and
-//     serialisable.
-//   - The three responsibilities are kept distinct: Driver (a factory +
-//     session-lifecycle owner), Session (one live conversation handle), and
-//     AgentProcess (a cached OS process that a Registry evicts when stale).
+// This package contains interfaces and plain-data contracts. Concrete
+// transports live in subpackages and driver/fake provides an in-memory test
+// double. Most SDK callers should use the root unio package instead.
 //
 // A driver turns "run this prompt, stream the result, let me cancel/resume it"
 // into a transport-specific reality, while the caller sees one Session interface
@@ -32,7 +18,7 @@ import (
 )
 
 // Phase is the lifecycle phase of a Session's underlying runtime, as observed by
-// the driver. It is the flattened form of Chorus's ProcessState enum.
+// the driver.
 type Phase string
 
 const (
@@ -63,7 +49,7 @@ type ProcessState struct {
 }
 
 // The error contract lives in the errs package (a cross-language contract; see
-// errs and SPEC.md). driver re-exports the pieces callers touch most so they
+// errs and docs/SPEC.md). driver re-exports the pieces callers touch most so they
 // can stay on the driver import, while errs remains the single source of truth
 // for error categories and their frozen string values.
 type (
@@ -141,11 +127,6 @@ const (
 )
 
 // TokenUsage tracks token consumption for a single model within one run.
-//
-// This is a unio-specific enhancement over the Chorus abstraction, which
-// carried no usage on its RunResult. First-class usage exists so cross-agent
-// token/cost accounting can be built directly on the SDK without re-parsing
-// each runtime's bespoke result line.
 type TokenUsage struct {
 	InputTokens      int64
 	OutputTokens     int64
@@ -180,15 +161,16 @@ type ProbeAuth string
 const (
 	// AuthNotInstalled: the CLI/adapter binary is missing on this host.
 	AuthNotInstalled ProbeAuth = "not_installed"
-	// AuthUnauthed: the binary is present but the user has not logged in.
+	// AuthUnauthed: the binary is present and the probe can confirm the user has
+	// not logged in.
 	AuthUnauthed ProbeAuth = "unauthed"
-	// AuthAuthed: the binary is present and credentials are valid.
+	// AuthAuthed: the probe found no detectable authentication problem. Some
+	// runtimes only support executable discovery, so first-turn auth can fail.
 	AuthAuthed ProbeAuth = "authed"
 )
 
 // StoredSessionMeta describes a previously-stored session recovered from a
-// runtime's on-disk history. Returned by Driver.ListSessions and is the
-// SDK-side support for a "session searcher" host feature.
+// runtime's on-disk history. It is returned by Driver.ListSessions.
 type StoredSessionMeta struct {
 	SessionID    SessionID
 	Title        string
@@ -223,9 +205,8 @@ type PromptReq struct {
 	Attachments []Attachment
 }
 
-// OpenParams unifies the "new" vs. "resume" intents (Chorus's SessionIntent).
-// A non-empty ResumeSessionID means: resume that runtime-owned session; empty
-// means start a fresh one.
+// OpenParams selects a new or resumed runtime Session. A non-empty
+// ResumeSessionID requests resume; an empty value starts a fresh Session.
 type OpenParams struct {
 	ResumeSessionID SessionID
 	// Cwd overrides the Agent's working directory for this session. It is used
