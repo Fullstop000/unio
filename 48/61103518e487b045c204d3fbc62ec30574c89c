@@ -1,0 +1,43 @@
+.gitignore
+  s_f365f7cae9f071::t_9279c9f72f7c09 15-28
+CONTRIBUTING.md
+  s_f365f7cae9f071::t_762aa4eae2bfcb 3-5,12,36-50,80-81,104-105,132,148-156
+README.md
+  s_f365f7cae9f071::t_f4c24f58b0146f 3-12
+python/examples/basic.py
+  s_f365f7cae9f071::t_f21c4dcc2b566a 1-13
+python/examples/stream.py
+  s_f365f7cae9f071::t_038dcd8fa9468c 1-18
+python/src/unio/__init__.py
+  s_f365f7cae9f071::t_03406a3e0f1c7f 1-68
+python/src/unio/_drivers/__init__.py
+  s_f365f7cae9f071::t_1f53095a058aef 1-20
+python/src/unio/_drivers/claude.py
+  s_f365f7cae9f071::t_0c13dc9ef37ec0 1-477
+python/src/unio/_drivers/fake.py
+  s_f365f7cae9f071::t_be9a3658e856f6 1-194
+python/src/unio/errors.py
+  s_f365f7cae9f071::t_df50687cd01f89 1-60
+python/src/unio/py.typed
+  s_f365f7cae9f071::t_36d8e0605d417d 1
+python/tests/test_api.py
+  s_f365f7cae9f071::t_90b98be6984996 1-111
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "4861103518e487b045c204d3fbc62ec30574c89c",
+  "prompts": {},
+  "sessions": {
+    "s_f365f7cae9f071": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6466-eb5a-7962-b8ae-05ac2a874b03",
+        "model": "unknown"
+      },
+      "human_author": "Fullstop000 <fullstop1005@gmail.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
