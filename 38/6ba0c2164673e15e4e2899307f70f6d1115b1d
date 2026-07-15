@@ -1,0 +1,25 @@
+CONTRIBUTING.md
+  s_f365f7cae9f071::t_a21f86119c2d4a 55-56
+python/README.md
+  s_f365f7cae9f071::t_47660c8ac42796 151-156
+python/pyproject.toml
+  s_f365f7cae9f071::t_654824e873e4ec 52
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "386ba0c2164673e15e4e2899307f70f6d1115b1d",
+  "prompts": {},
+  "sessions": {
+    "s_f365f7cae9f071": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6466-eb5a-7962-b8ae-05ac2a874b03",
+        "model": "unknown"
+      },
+      "human_author": "Fullstop000 <fullstop1005@gmail.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
