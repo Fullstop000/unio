@@ -10,6 +10,10 @@ Built-in ACP v1 runtimes are selected with `unio.Kimi`, `unio.TraeX`, and
 See [docs/API_SUPPORT.md](docs/API_SUPPORT.md) for the complete top-level API
 inventory and the per-Agent support matrix.
 
+See [docs/ERRORS.md](docs/ERRORS.md) for typed error categories, retry guidance,
+context cancellation, and the distinction between errors, blocked turns, and
+confirmed interruption.
+
 ## Install
 
 ```sh

@@ -137,3 +137,6 @@
 - Blocking reasons: `user_input`, `tool_approval`, `permission`, `authentication`, `external`
 - Error kinds: `transport`, `protocol`, `timeout`, `runtime_reported`, `unsupported`, `not_installed`, `invalid_state`, `session_not_found`
 - Session data formats: `jsonl`
+
+See [ERRORS.md](ERRORS.md) for error meanings, matching examples, and caller
+recovery guidance.
