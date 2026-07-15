@@ -1,0 +1,23 @@
+.agents/skills/ship/SKILL.md
+  s_f365f7cae9f071::t_486132d6a559fa 81-98,102,106-109
+.github/pull_request_template.md
+  s_f365f7cae9f071::t_60a3491eefba93 7,12,19-25
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "903580ea060ca3cf6a31236b6aba0de7af3e1062",
+  "prompts": {},
+  "sessions": {
+    "s_f365f7cae9f071": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6466-eb5a-7962-b8ae-05ac2a874b03",
+        "model": "unknown"
+      },
+      "human_author": "Fullstop000 <fullstop1005@gmail.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
