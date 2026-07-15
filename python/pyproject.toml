@@ -3,7 +3,7 @@ requires = ["hatchling>=1.26"]
 build-backend = "hatchling.build"
 
 [project]
-name = "unio"
+name = "unio-py"
 version = "0.1.0"
 description = "One async Python API for Claude Code, Codex, and ACP coding agents"
 readme = "README.md"

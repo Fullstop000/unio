@@ -13,7 +13,7 @@ Python 3.11+ is supported. After the first `python-v0.1.0` release, install the
 SDK and separately install and authenticate the CLI you intend to drive:
 
 ```sh
-python -m pip install unio
+python -m pip install unio-py
 codex --version  # or claude/kimi/opencode --version
 ```
 
@@ -21,6 +21,8 @@ Runtime discovery matches the [support
 matrix](https://github.com/Fullstop000/unio/blob/master/docs/API_SUPPORT.md).
 Creating an `Agent` checks that the executable exists; authentication and
 provider errors can surface on the first operation.
+
+The PyPI distribution is named `unio-py`; the import package remains `unio`.
 
 For development from this repository:
 

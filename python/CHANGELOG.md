@@ -2,4 +2,4 @@
 
 ## Unreleased
 
-- Added the initial async Python SDK for Claude Code, Codex, Kimi, TraeX, and OpenCode.
+- Added the initial `unio-py` async SDK for Claude Code, Codex, Kimi, TraeX, and OpenCode.

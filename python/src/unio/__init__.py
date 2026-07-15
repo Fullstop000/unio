@@ -22,7 +22,7 @@ from .models import (
 )
 
 try:
-    __version__ = version("unio")
+    __version__ = version("unio-py")
 except PackageNotFoundError:
     __version__ = "0.0.0+unknown"
 

@@ -148,9 +148,9 @@ are never moved or recreated after publication.
 
 Python versions are independent from Go versions. A `python-vX.Y.Z` tag must
 match `python/pyproject.toml` and `python/CHANGELOG.md`; the Python release
-workflow builds and publishes the package through PyPI Trusted Publishing.
-Configure the PyPI project with repository
-`Fullstop000/unio`, workflow `python-release.yml`, and environment `pypi` before
-creating the first tag. TestPyPI may be used for the first dry run with a
-temporary workflow/environment, but its artifact must not be reused for the
-production release.
+workflow builds and publishes the `unio-py` distribution through PyPI Trusted
+Publishing. Configure that PyPI project with repository `Fullstop000/unio`,
+workflow `python-release.yml`, and environment `pypi` before creating the first
+tag. TestPyPI may be used for the first dry run with a temporary
+workflow/environment, but its artifact must not be reused for the production
+release.
