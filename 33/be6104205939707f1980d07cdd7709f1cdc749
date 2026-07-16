@@ -1,0 +1,51 @@
+.agents/skills/ship/SKILL.md
+  s_f365f7cae9f071::t_31763a27dbf9c3 155-157,161-162,187-188
+.github/pull_request_template.md
+  s_f365f7cae9f071::t_14878e863f25c1 26
+.github/workflows/python-ci.yml
+  s_f365f7cae9f071::t_6a17c16f92bb30 56-57,59,61
+CHANGELOG.md
+  s_f365f7cae9f071::t_d1eb6ca0f69151 8
+CONTRIBUTING.md
+  s_f365f7cae9f071::t_e38d87ed5703c9 73-75
+README.md
+  s_f365f7cae9f071::t_3af03e8b3be5a7 14-18,52,55-57
+docs/API_SUPPORT.md
+  s_f365f7cae9f071::t_73505e4a6253e4 3-6,11
+docs/README.md
+  s_f365f7cae9f071::t_9f940d6f73fe80 25-30
+docs/SPEC.md
+  s_f365f7cae9f071::t_af0375e3648490 156-159
+driver/acp/driver.go
+  s_f365f7cae9f071::t_aed69bb8533274 100
+driver/acp/driver_test.go
+  s_f365f7cae9f071::t_4d8b3e8860da8f 508-515
+driver/acp/process.go
+  s_f365f7cae9f071::t_337efedd8a87cb 295,303
+driver/acp/session.go
+  s_f365f7cae9f071::t_26661738865144 365,368-370
+python/CHANGELOG.md
+  s_f365f7cae9f071::t_195de84b2e57f7 10-11
+python/src/unio/_drivers/codex.py
+  s_f365f7cae9f071::t_900dd7b8cfd24c 350,397,406,438,443-444,541-549,551-560,564,567-569,585-587
+python/tests/test_protocols.py
+  s_f365f7cae9f071::t_519036c7db7def 225-262
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "33be6104205939707f1980d07cdd7709f1cdc749",
+  "prompts": {},
+  "sessions": {
+    "s_f365f7cae9f071": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6466-eb5a-7962-b8ae-05ac2a874b03",
+        "model": "unknown"
+      },
+      "human_author": "Fullstop000 <fullstop1005@gmail.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
