@@ -53,8 +53,8 @@ func TestE2E_Fake_Cancel(t *testing.T) {
 }
 
 // fakeBlockedHarness scripts a turn that blocks awaiting approval, then a second
-// turn that completes once Continue supplies the option. This drives the full
-// prompt -> Blocked -> Continue -> Completed path deterministically.
+// turn that completes once Respond supplies the option. This drives the full
+// Send -> Blocked -> Respond -> Completed path deterministically.
 func fakeBlockedHarness(t *testing.T) Harness {
 	return Harness{
 		Name: "fake",
@@ -72,12 +72,12 @@ func fakeBlockedHarness(t *testing.T) Harness {
 			)
 			return fd
 		},
-		FirstPrompt:   "delete everything",
-		ContinueInput: "allow_once",
-		Timeout:       3 * time.Second,
+		FirstPrompt:    "delete everything",
+		ResponseOption: "allow_once",
+		Timeout:        3 * time.Second,
 	}
 }
 
-func TestE2E_Fake_BlockedContinue(t *testing.T) {
+func TestE2E_Fake_BlockedResponse(t *testing.T) {
 	BlockedScenario(t, fakeBlockedHarness(t))
 }

@@ -28,9 +28,12 @@ from ..models import (
     BlockedKind,
     BlockedReason,
     BlockOption,
+    OptionSelection,
     RawSessionData,
     SessionDataFormat,
     TokenStatistics,
+    UserInput,
+    UserMessage,
 )
 
 _ACP_STREAM_LIMIT = 8 * 1024 * 1024
@@ -406,9 +409,12 @@ class ACPSession(DriverSession):
         self._phase = ProcessPhase.ACTIVE
         self.events.emit(DriverEvent(DriverEventType.SESSION_ATTACHED, session_id=self._id))
 
-    async def prompt(self, text: str) -> str:
+    async def send(self, value: UserInput) -> str:
         if self._phase is not ProcessPhase.ACTIVE:
             raise invalid_state("acp session is not active")
+        if not isinstance(value, UserMessage):
+            raise invalid_state("acp: a new turn requires UserMessage")
+        text = value.text
         if self._first_turn and self._spec.system_prompt:
             text = f"{self._spec.system_prompt}\n\n{text}"
         self._first_turn = False
@@ -422,11 +428,13 @@ class ACPSession(DriverSession):
         self._prompt_task = asyncio.create_task(self._finish_prompt(future))
         return run_id
 
-    async def continue_(self, value: str) -> str:
+    async def respond(self, value: UserInput) -> str:
         if self._phase is not ProcessPhase.BLOCKED or self._permission_id is None:
             raise invalid_state("acp session is not blocked")
-        if self._permission_options and value not in self._permission_options:
-            raise invalid_state(f"acp: invalid permission option {value!r}")
+        if not isinstance(value, OptionSelection):
+            raise invalid_state("acp: blocked permission requires OptionSelection")
+        if self._permission_options and value.value not in self._permission_options:
+            raise invalid_state(f"acp: invalid permission option {value.value!r}")
         run_id = new_run_id()
         self._active_run = run_id
         request_id = self._permission_id
@@ -434,7 +442,7 @@ class ACPSession(DriverSession):
         self._phase = ProcessPhase.PROMPT_IN_FLIGHT
         await self._process.respond(
             request_id,
-            {"outcome": {"outcome": "selected", "optionId": value}},
+            {"outcome": {"outcome": "selected", "optionId": value.value}},
         )
         return run_id
 

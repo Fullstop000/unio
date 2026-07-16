@@ -18,7 +18,14 @@ from .._driver import (
     new_run_id,
 )
 from ..errors import AgentError, invalid_state, unsupported
-from ..models import BlockedReason, RawSessionData, TokenStatistics
+from ..models import (
+    BlockedReason,
+    OptionSelection,
+    RawSessionData,
+    TokenStatistics,
+    UserInput,
+    UserMessage,
+)
 
 
 @dataclass(slots=True)
@@ -88,18 +95,28 @@ class FakeSession(DriverSession):
         self._phase = ProcessPhase.ACTIVE
         self.events.emit(DriverEvent(DriverEventType.SESSION_ATTACHED, session_id=self._id))
 
-    async def prompt(self, text: str) -> str:
+    async def send(self, value: UserInput) -> str:
         if self._phase is not ProcessPhase.ACTIVE:
             raise invalid_state("fake session is not active")
-        return self._start_script(self._driver.next_script(text))
+        if not isinstance(value, UserMessage):
+            raise invalid_state("fake: a new turn requires UserMessage")
+        return self._start_script(self._driver.next_script(value.text))
 
-    async def continue_(self, value: str) -> str:
+    async def respond(self, value: UserInput) -> str:
         if self._phase is not ProcessPhase.BLOCKED or self._blocked is None:
             raise invalid_state("fake session is not blocked")
-        if self._blocked.options and value not in {item.value for item in self._blocked.options}:
-            raise invalid_state("invalid blocked response")
+        if self._blocked.options:
+            if not isinstance(value, OptionSelection):
+                raise invalid_state("fake: blocked options require OptionSelection")
+            if value.value not in {item.value for item in self._blocked.options}:
+                raise invalid_state("invalid blocked response")
+            response = value.value
+        else:
+            if not isinstance(value, UserMessage):
+                raise invalid_state("fake: blocked user input requires UserMessage")
+            response = value.text
         self._blocked = None
-        return self._start_script(self._driver.next_script(value))
+        return self._start_script(self._driver.next_script(response))
 
     async def interrupt(self) -> None:
         if self._phase is ProcessPhase.BLOCKED:

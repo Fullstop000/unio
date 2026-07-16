@@ -26,10 +26,13 @@ from ..models import (
     BlockedKind,
     BlockedReason,
     BlockOption,
+    OptionSelection,
     RawSessionData,
     SessionDataFormat,
     TokenStatistics,
     TokenUsage,
+    UserInput,
+    UserMessage,
 )
 
 
@@ -372,16 +375,18 @@ class CodexSession(DriverSession):
         self._phase = ProcessPhase.ACTIVE
         self.events.emit(DriverEvent(DriverEventType.SESSION_ATTACHED, session_id=self._id))
 
-    async def prompt(self, text: str) -> str:
+    async def send(self, value: UserInput) -> str:
         if self._phase is not ProcessPhase.ACTIVE:
             raise invalid_state("codex session is not active")
+        if not isinstance(value, UserMessage):
+            raise invalid_state("codex: a new turn requires UserMessage")
         run_id = new_run_id()
         self._active_run = run_id
         self._phase = ProcessPhase.PROMPT_IN_FLIGHT
         try:
             result = await self._process.request(
                 "turn/start",
-                {"threadId": self._id, "input": [{"type": "text", "text": text}]},
+                {"threadId": self._id, "input": [{"type": "text", "text": value.text}]},
             )
         except Exception:
             self._active_run = ""
@@ -391,12 +396,14 @@ class CodexSession(DriverSession):
         self._process.map_turn(self._turn_id, self._id)
         return run_id
 
-    async def continue_(self, value: str) -> str:
+    async def respond(self, value: UserInput) -> str:
         if self._phase is not ProcessPhase.BLOCKED or self._approval_id is None:
             raise invalid_state("codex session is not blocked")
-        decision = {"allow_once": "accept", "deny": "decline", "cancel": "cancel"}.get(value)
+        if not isinstance(value, OptionSelection):
+            raise invalid_state("codex: blocked approval requires OptionSelection")
+        decision = {"allow_once": "accept", "deny": "decline", "cancel": "cancel"}.get(value.value)
         if decision is None:
-            raise invalid_state(f"codex: invalid approval option {value!r}")
+            raise invalid_state(f"codex: invalid approval option {value.value!r}")
         run_id = new_run_id()
         self._active_run = run_id
         approval_id = self._approval_id

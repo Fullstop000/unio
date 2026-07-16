@@ -108,7 +108,7 @@ type session struct {
 	doneMu   sync.Mutex
 	turnDone chan struct{}
 
-	// mu serialises the mutating lifecycle methods (Run/Prompt/Cancel/Close) so
+	// mu serialises the mutating lifecycle methods (Start/Send/Respond/Interrupt/Close) so
 	// the SDK — not the caller — guarantees a Session is safe for concurrent
 	// use (SPEC §Concurrency). It is held only across brief request/ack windows,
 	// never for a whole turn, so Cancel is never blocked mid-turn. Read methods
@@ -150,8 +150,8 @@ func (s *session) transportUnavailable() bool {
 	return s.transportClosed.Load() || s.proc.IsStale()
 }
 
-// Run starts the shared child (if needed) then starts or resumes this thread.
-func (s *session) Run(initPrompt *driver.PromptReq) error {
+// Start starts the shared child (if needed) then starts or resumes this thread.
+func (s *session) Start() error {
 	ctx := s.ctx
 	s.mu.Lock()
 	if s.closed {
@@ -198,11 +198,6 @@ func (s *session) Run(initPrompt *driver.PromptReq) error {
 	s.setState(driver.ProcessState{Phase: driver.PhaseActive, SessionID: threadID})
 	s.mu.Unlock()
 
-	if initPrompt != nil {
-		if _, err := s.Prompt(*initPrompt); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
@@ -251,9 +246,9 @@ func (s *session) startOrResumeThread(ctx context.Context) (string, error) {
 	return ev.ThreadID, nil
 }
 
-// Prompt sends turn/start and marks the turn in flight; output arrives via the
+// Send sends turn/start and marks the turn in flight; output arrives via the
 // reader routing into onEvent.
-func (s *session) Prompt(req driver.PromptReq) (driver.RunID, error) {
+func (s *session) Send(input driver.UserInput) (driver.RunID, error) {
 	ctx := s.ctx
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -263,9 +258,13 @@ func (s *session) Prompt(req driver.PromptReq) (driver.RunID, error) {
 	if s.transportUnavailable() {
 		return "", driver.NewTransportError("codex app-server is closed")
 	}
+	message, ok := input.(driver.UserMessage)
+	if !ok {
+		return "", driver.NewInvalidStateError("codex: a new turn requires UserMessage")
+	}
 	threadID := s.SessionID()
 	if threadID == "" {
-		return "", driver.NewTransportError("codex: prompt before Run")
+		return "", driver.NewTransportError("codex: send before Start")
 	}
 	runID := driver.NewRunID()
 	s.curRun.Store(&runID)
@@ -279,7 +278,7 @@ func (s *session) Prompt(req driver.PromptReq) (driver.RunID, error) {
 	}
 
 	id := s.proc.allocID()
-	ch, sendErr := s.proc.registerAndSend(id, "turn/start", BuildTurnStart(id, threadID, req.Text))
+	ch, sendErr := s.proc.registerAndSend(id, "turn/start", BuildTurnStart(id, threadID, message.Text))
 	if sendErr != nil {
 		s.clearSubmittedTurn()
 		return runID, sendErr
@@ -367,7 +366,7 @@ func (s *session) interruptLocked(ctx context.Context) error {
 // written but its acknowledgement lost the race with context cancellation.
 // It prefers a normal turn interrupt; if acknowledgement/interrupt cannot be
 // confirmed promptly, it tears down and reaps the shared process before
-// Prompt returns, so the public session can never expose a false Idle state.
+// Send returns, so the public session can never expose a false Idle state.
 func (s *session) stopSubmittedTurn(ch chan AppServerEvent) {
 	cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	ev, err := waitResp(cleanupCtx, ch, s.proc.closed)
@@ -399,7 +398,7 @@ func (s *session) clearSubmittedTurn() {
 	s.setState(driver.ProcessState{Phase: driver.PhaseActive, SessionID: s.SessionID()})
 }
 
-func (s *session) Continue(input string) (driver.RunID, error) {
+func (s *session) Respond(input driver.UserInput) (driver.RunID, error) {
 	ctx := s.ctx
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -418,11 +417,16 @@ func (s *session) Continue(input string) (driver.RunID, error) {
 		s.blockMu.Unlock()
 		return "", driver.NewInvalidStateError("codex: no blocked turn")
 	}
+	selection, ok := input.(driver.OptionSelection)
+	if !ok {
+		s.blockMu.Unlock()
+		return "", driver.NewInvalidStateError("codex: blocked approval requires OptionSelection")
+	}
 	decision, ok := map[string]string{
 		"allow_once": "accept",
 		"deny":       "decline",
 		"cancel":     "cancel",
-	}[input]
+	}[selection.Value]
 	if !ok {
 		s.blockMu.Unlock()
 		return "", driver.NewInvalidStateError("codex: invalid blocked response")
@@ -474,7 +478,7 @@ func (s *session) finishTurnDone() {
 
 // Close unregisters the session (tearing down the shared child only when this
 // was the last one) and closes the bus. Idempotent and safe against concurrent
-// Run/Prompt/Cancel.
+// Start/Send/Respond/Interrupt.
 func (s *session) Close() error {
 	ctx := context.WithoutCancel(s.ctx)
 	s.mu.Lock()

@@ -54,6 +54,21 @@ type BlockOption = driver.BlockOption
 // BlockedReason describes why a turn blocked and any advertised responses.
 type BlockedReason = driver.BlockedReason
 
+// UserInput is one caller submission accepted by Run and Stream.
+type UserInput = driver.UserInput
+
+// UserMessage supplies natural-language input.
+type UserMessage = driver.UserMessage
+
+// OptionSelection selects a value advertised by Result.Blocked.Options.
+type OptionSelection = driver.OptionSelection
+
+// Message constructs natural-language caller input.
+func Message(text string) UserMessage { return UserMessage{Text: text} }
+
+// SelectOption constructs a response for one advertised blocked option value.
+func SelectOption(value string) OptionSelection { return OptionSelection{Value: value} }
+
 const (
 	// BlockedUserInput requests free-form user input.
 	BlockedUserInput = driver.BlockedUserInput

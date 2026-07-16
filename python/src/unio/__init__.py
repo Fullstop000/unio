@@ -11,6 +11,7 @@ from .models import (
     BlockOption,
     Event,
     EventKind,
+    OptionSelection,
     RawSessionData,
     Result,
     SessionDataFormat,
@@ -19,6 +20,8 @@ from .models import (
     TokenStatistics,
     TokenUsage,
     ToolCall,
+    UserInput,
+    UserMessage,
 )
 
 try:
@@ -52,6 +55,7 @@ __all__ = [
     "Idle",
     "Kimi",
     "OpenCode",
+    "OptionSelection",
     "RawSessionData",
     "Result",
     "Running",
@@ -64,5 +68,7 @@ __all__ = [
     "TokenUsage",
     "ToolCall",
     "TraeX",
+    "UserInput",
+    "UserMessage",
     "kind_of",
 ]

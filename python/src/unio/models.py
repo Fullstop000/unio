@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, TypeAlias
 
 
 class AgentKind(StrEnum):
@@ -33,6 +33,23 @@ class EventKind(StrEnum):
     TEXT = "text"
     TOOL_CALL = "tool_call"
     TOOL_RESULT = "tool_result"
+
+
+@dataclass(frozen=True, slots=True)
+class UserMessage:
+    """Natural-language caller input."""
+
+    text: str
+
+
+@dataclass(frozen=True, slots=True)
+class OptionSelection:
+    """One option value advertised by a blocked turn."""
+
+    value: str
+
+
+UserInput: TypeAlias = UserMessage | OptionSelection
 
 
 class SessionDataFormat(StrEnum):

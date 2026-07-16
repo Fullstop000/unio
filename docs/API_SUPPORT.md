@@ -79,7 +79,7 @@ specific CLI version. Report the exact CLI version with compatibility issues.
 | `turn.run` | ✅ | ✅ | ✅ | ✅ | ✅ |  |
 | `turn.stream` | ✅ | ✅ | ✅ | ✅ | ✅ |  |
 | `turn.interrupt` | ✅ | ✅ | ✅ | ✅ | ✅ | Claude terminates its process and resumes automatically on the next turn |
-| `turn.continue` | ❌ | ⚠️ | ✅ | ✅ | ✅ | Codex supports command and file approvals only; ACP uses runtime-provided option IDs |
+| `turn.respond_via_run` | ❌ | ⚠️ | ✅ | ✅ | ✅ | A blocked Session dispatches `Run`/`Stream` to the pending interaction; Codex supports command and file approvals only |
 
 ## Stream Consumption
 

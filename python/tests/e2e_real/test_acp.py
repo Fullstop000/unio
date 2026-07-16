@@ -79,9 +79,14 @@ def test_real_acp_stream_persistence_and_resume(case: RuntimeCase, tmp_path: Pat
 
         async with _agent(case, tmp_path) as agent:
             session = agent.new_session()
-            stream = await session.stream(f"Reply with exactly: {first_marker}")
+            stream = await session.stream(unio.UserMessage(f"Reply with exactly: {first_marker}"))
             events = [event async for event in stream]
             result = await stream.result()
+            streamed_text = "".join(
+                event.text for event in events if event.kind is unio.EventKind.TEXT
+            )
+            assert events
+            assert streamed_text == result.text
             assert result.text.strip() == first_marker
             assert session.id
             assert result.session_id == session.id
@@ -111,7 +116,7 @@ def test_real_acp_stream_persistence_and_resume(case: RuntimeCase, tmp_path: Pat
             sessions = await resumed_agent.list_sessions()
             assert any(item.id == session_id for item in sessions)
             resumed = await resumed_agent.get_session(session_id)
-            result = await resumed.run(f"Reply with exactly: {resumed_marker}")
+            result = await resumed.run(unio.UserMessage(f"Reply with exactly: {resumed_marker}"))
             assert result.text.strip() == resumed_marker
             assert resumed.id == session_id
             print(
@@ -135,14 +140,18 @@ def test_real_acp_interrupt_and_reuse(case: RuntimeCase, tmp_path: Path) -> None
         async with _agent(case, tmp_path) as agent:
             session = agent.new_session()
             stream = await session.stream(
-                "Without using tools, write every integer from 1 to 100000, one per line."
+                unio.UserMessage(
+                    "Without using tools, write every integer from 1 to 100000, one per line."
+                )
             )
             await asyncio.sleep(0.5)
             await session.interrupt()
             interrupted = await asyncio.wait_for(stream.result(), timeout=60)
             assert interrupted.interrupted
 
-            follow_up = await session.run(f"Reply with exactly: {follow_up_marker}")
+            follow_up = await session.run(
+                unio.UserMessage(f"Reply with exactly: {follow_up_marker}")
+            )
             assert follow_up.text.strip() == follow_up_marker
             print(
                 f"E2E {case.kind} interrupt:",

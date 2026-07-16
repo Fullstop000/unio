@@ -31,7 +31,14 @@ from ..errors import (
     transport,
     unsupported,
 )
-from ..models import RawSessionData, SessionDataFormat, TokenStatistics, TokenUsage
+from ..models import (
+    RawSessionData,
+    SessionDataFormat,
+    TokenStatistics,
+    TokenUsage,
+    UserInput,
+    UserMessage,
+)
 
 
 def _json_object(value: Any) -> dict[str, Any]:
@@ -245,19 +252,21 @@ class ClaudeSession(DriverSession):
         self._reader_task = asyncio.create_task(self._reader_loop())
         self._stderr_task = asyncio.create_task(self._drain_stderr())
 
-    async def prompt(self, text: str) -> str:
+    async def send(self, value: UserInput) -> str:
         process = self._process
         if process is None or process.stdin is None:
-            raise transport("claude: prompt before start")
+            raise transport("claude: send before start")
         if self._phase not in {ProcessPhase.STARTING, ProcessPhase.ACTIVE}:
             raise invalid_state("claude session is not active")
+        if not isinstance(value, UserMessage):
+            raise invalid_state("claude: a new turn requires UserMessage")
         run_id = new_run_id()
         self._active_run = run_id
         self._streamed = False
         self._phase = ProcessPhase.PROMPT_IN_FLIGHT
         payload = {
             "type": "user",
-            "message": {"role": "user", "content": text},
+            "message": {"role": "user", "content": value.text},
         }
         try:
             process.stdin.write(json.dumps(payload, separators=(",", ":")).encode() + b"\n")
@@ -267,7 +276,7 @@ class ClaudeSession(DriverSession):
             raise transport(f"claude: write stdin: {error}") from error
         return run_id
 
-    async def continue_(self, value: str) -> str:
+    async def respond(self, value: UserInput) -> str:
         raise unsupported("claude: no blocked turn")
 
     async def interrupt(self) -> None:

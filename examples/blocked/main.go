@@ -31,7 +31,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	result, err := session.Run("Run pwd and report the result")
+	result, err := session.Run(unio.Message("Run pwd and report the result"))
 	reader := bufio.NewReader(os.Stdin)
 	for err == nil && result.Blocked != nil {
 		fmt.Printf("blocked: %s\n", result.Blocked.Message)
@@ -43,7 +43,11 @@ func main() {
 		if readErr != nil {
 			log.Fatal(readErr)
 		}
-		result, err = session.Continue(strings.TrimSpace(input))
+		if len(result.Blocked.Options) > 0 {
+			result, err = session.Run(unio.SelectOption(strings.TrimSpace(input)))
+		} else {
+			result, err = session.Run(unio.Message(strings.TrimSpace(input)))
+		}
 	}
 	if err != nil {
 		log.Fatal(err)

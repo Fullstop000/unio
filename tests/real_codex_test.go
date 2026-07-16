@@ -13,7 +13,7 @@ import (
 	"github.com/Fullstop000/unio"
 )
 
-// Real Codex E2E proves Agent -> Session -> Run drives app-server end to end.
+// Real Codex E2E proves Agent -> Session -> Stream drives app-server end to end.
 func TestReal_Codex_Run(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
@@ -26,14 +26,31 @@ func TestReal_Codex_Run(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := session.Run("Reply with exactly one word: pong")
+	const marker = "GO_CODEX_E2E_PONG"
+	stream, err := session.Stream(unio.Message("Reply with exactly: " + marker))
 	if err != nil {
-		t.Fatalf("run: %v", err)
+		t.Fatalf("stream: %v", err)
 	}
-	if strings.TrimSpace(res.Text) == "" {
-		t.Fatal("expected non-empty assistant text")
+	var streamedText strings.Builder
+	var eventKinds []unio.EventKind
+	for stream.Next() {
+		event := stream.Event()
+		eventKinds = append(eventKinds, event.Kind)
+		if event.Kind == unio.KindText {
+			streamedText.WriteString(event.Text)
+		}
 	}
-	t.Logf("codex said %q", res.Text)
+	res, err := stream.Result()
+	if err != nil {
+		t.Fatalf("stream result: %v", err)
+	}
+	if streamedText.String() != res.Text {
+		t.Fatalf("streamed text %q != result text %q", streamedText.String(), res.Text)
+	}
+	if strings.TrimSpace(res.Text) != marker || len(eventKinds) == 0 {
+		t.Fatalf("unexpected result=%+v events=%v", res, eventKinds)
+	}
+	t.Logf("codex stream events=%v text=%q", eventKinds, res.Text)
 	for model, u := range res.Usage {
 		t.Logf("usage[%s]: in=%d out=%d cacheRead=%d", model, u.InputTokens, u.OutputTokens, u.CacheReadTokens)
 	}
@@ -64,7 +81,7 @@ func TestReal_Codex_Interrupt(t *testing.T) {
 	}
 	// Fire a long turn; the stream drains when the turn ends (naturally or
 	// interrupted).
-	st, err := s.Stream("Count slowly from 1 to 500, one number per line.")
+	st, err := s.Stream(unio.Message("Count slowly from 1 to 500, one number per line."))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +105,7 @@ func TestReal_Codex_Interrupt(t *testing.T) {
 	}
 
 	// Session must survive the interrupt and answer a follow-up.
-	res, err := s.Run("Reply with exactly one word: ok")
+	res, err := s.Run(unio.Message("Reply with exactly one word: ok"))
 	if err != nil {
 		t.Fatalf("follow-up prompt after interrupt: %v", err)
 	}
@@ -126,8 +143,8 @@ func forceApprovalCodexHome(t *testing.T) string {
 
 // Real Codex block E2E: with approval forced on, prompting codex to run an
 // untrusted shell command must surface a tool-approval Block through the facade,
-// and Continue("allow_once") must resume the same session to completion.
-func TestReal_Codex_BlockAndContinue(t *testing.T) {
+// and Run(SelectOption("allow_once")) must answer it in the same session.
+func TestReal_Codex_BlockAndRespond(t *testing.T) {
 	home := forceApprovalCodexHome(t)
 	if home == "" {
 		t.Skip("codex auth.json not found; skipping real block E2E")
@@ -145,7 +162,7 @@ func TestReal_Codex_BlockAndContinue(t *testing.T) {
 	}
 
 	// curl is not in codex's trusted set, so an untrusted policy escalates it.
-	blocked, err := session.Run("Use your shell tool to run exactly this command: `curl -s https://example.com`. Actually execute it via the shell tool; do not just describe it.")
+	blocked, err := session.Run(unio.Message("Use your shell tool to run exactly this command: `curl -s https://example.com`. Actually execute it via the shell tool; do not just describe it."))
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -160,12 +177,12 @@ func TestReal_Codex_BlockAndContinue(t *testing.T) {
 	}
 	t.Logf("codex blocked: kind=%s message=%q options=%+v", blocked.Blocked.Kind, blocked.Blocked.Message, blocked.Blocked.Options)
 
-	continued, err := session.Continue("allow_once")
+	continued, err := session.Run(unio.SelectOption("allow_once"))
 	if err != nil {
-		t.Fatalf("continue: %v", err)
+		t.Fatalf("respond: %v", err)
 	}
 	if session.State() != unio.Idle {
-		t.Fatalf("state after continue = %q; want idle", session.State())
+		t.Fatalf("state after response = %q; want idle", session.State())
 	}
 	t.Logf("codex resumed after approval; text=%q", continued.Text)
 }

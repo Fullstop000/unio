@@ -29,7 +29,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	stream, err := session.Stream("Count upward slowly, one number per line")
+	stream, err := session.Stream(unio.Message("Count upward slowly, one number per line"))
 	if err != nil {
 		log.Fatal(err)
 	}

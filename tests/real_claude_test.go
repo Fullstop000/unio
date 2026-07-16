@@ -31,7 +31,7 @@ func TestReal_Claude_Run(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := session.Run("Reply with exactly one word: ping")
+	res, err := session.Run(unio.Message("Reply with exactly one word: ping"))
 	if err != nil {
 		skipClaudeEnvError(t, err)
 		t.Fatalf("run: %v", err)
@@ -78,7 +78,7 @@ func TestReal_Claude_Stream(t *testing.T) {
 		t.Fatalf("open: %v", err)
 	}
 	var text strings.Builder
-	st, err := s.Stream("Reply with exactly one word: ping")
+	st, err := s.Stream(unio.Message("Reply with exactly one word: ping"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +111,7 @@ func TestReal_Claude_InterruptAndRecover(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	stream, err := session.Stream("Write the integers from 1 through 5000, separated by spaces.")
+	stream, err := session.Stream(unio.Message("Write the integers from 1 through 5000, separated by spaces."))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +150,7 @@ func TestReal_Claude_InterruptAndRecover(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetSession(%q): %v", id, err)
 	}
-	result, err := recovered.Run("Reply with exactly one word: recovered")
+	result, err := recovered.Run(unio.Message("Reply with exactly one word: recovered"))
 	if err != nil {
 		skipClaudeEnvError(t, err)
 		t.Fatalf("run recovered session: %v", err)

@@ -44,7 +44,7 @@ import unio
 async def main() -> None:
     async with unio.Agent(unio.Codex, cwd="/path/to/repo") as agent:
         session = agent.new_session()
-        result = await session.run("Explain this repository")
+        result = await session.run(unio.UserMessage("Explain this repository"))
         print(result.text)
 
 
@@ -59,7 +59,7 @@ asyncio.run(main())
 ```python
 async with unio.Agent(unio.Claude, cwd=".") as agent:
     session = agent.new_session()
-    stream = await session.stream("Review this repository")
+    stream = await session.stream(unio.UserMessage("Review this repository"))
     async for event in stream:
         if event.kind in {unio.EventKind.TEXT, unio.EventKind.THINKING}:
             print(event.text, end="")
@@ -74,19 +74,22 @@ remains running until its terminal event is consumed.
 ## Approvals and interruption
 
 ```python
-result = await session.run("Apply the change")
+result = await session.run(unio.UserMessage("Apply the change"))
 while result.blocked is not None:
     if result.blocked.options:
         for option in result.blocked.options:
             print(f"{option.value}: {option.label}")
-        prompt = "Choose an option value: "
+        selected = await asyncio.to_thread(input, "Choose an option value: ")
+        user_input = unio.OptionSelection(selected)
     else:
-        prompt = f"{result.blocked.message}\nReply: "
-    selected = await asyncio.to_thread(input, prompt)
-    result = await session.continue_(selected)
+        reply = await asyncio.to_thread(input, f"{result.blocked.message}\nReply: ")
+        user_input = unio.UserMessage(reply)
+    result = await session.run(user_input)
 ```
 
-`continue_` has a trailing underscore because `continue` is a Python keyword.
+`run` and `stream` accept the same `UserInput` union. On an idle Session,
+`UserMessage` starts a turn. On a blocked Session, use `OptionSelection` for an
+advertised option or `UserMessage` when the runtime requests free-form input.
 Use `await session.interrupt()` to stop a running or blocked turn. Confirmed
 interruption sets `result.interrupted`; an idle interrupt is a no-op.
 
@@ -104,7 +107,7 @@ items = await agent.list_sessions(limit=20)
 if not items:
     raise RuntimeError("No persisted sessions")
 session = await agent.get_session(items[0].id)
-result = await session.run("Continue the previous work")
+result = await session.run(unio.UserMessage("Continue the previous work"))
 
 raw = await session.raw()
 statistics = await session.token_statistics()

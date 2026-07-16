@@ -1,5 +1,5 @@
 {
-  "spec_version": "0.6.0",
+  "spec_version": "0.7.0",
   "agent_kind": ["claude", "codex", "kimi", "traex", "opencode"],
   "session_state": ["idle", "running", "blocked"],
   "blocked_kind": ["user_input", "tool_approval", "permission", "authentication", "external"],

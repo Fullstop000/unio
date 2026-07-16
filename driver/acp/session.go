@@ -74,7 +74,7 @@ func (s *session) setState(state driver.ProcessState) {
 	s.bus.Emit(driver.LifecycleEvent(state))
 }
 
-func (s *session) Run(initPrompt *driver.PromptReq) error {
+func (s *session) Start() error {
 	ctx := s.ctx
 	s.opMu.Lock()
 	s.mu.Lock()
@@ -145,13 +145,10 @@ func (s *session) Run(initPrompt *driver.PromptReq) error {
 	s.setState(driver.ProcessState{Phase: driver.PhaseActive, SessionID: id})
 	s.opMu.Unlock()
 
-	if initPrompt != nil {
-		_, err = s.Prompt(*initPrompt)
-	}
-	return err
+	return nil
 }
 
-func (s *session) Prompt(req driver.PromptReq) (driver.RunID, error) {
+func (s *session) Send(input driver.UserInput) (driver.RunID, error) {
 	ctx := s.ctx
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
@@ -167,7 +164,12 @@ func (s *session) Prompt(req driver.PromptReq) (driver.RunID, error) {
 		s.mu.Unlock()
 		return "", driver.NewInvalidStateError("acp: session already has an active prompt")
 	}
-	text := req.Text
+	message, ok := input.(driver.UserMessage)
+	if !ok {
+		s.mu.Unlock()
+		return "", driver.NewInvalidStateError("acp: a new turn requires UserMessage")
+	}
+	text := message.Text
 	if !s.firstTurn && s.spec.SystemPrompt != "" {
 		text = s.spec.SystemPrompt + "\n\n" + text
 	}
@@ -244,7 +246,7 @@ func promptStopReason(result json.RawMessage) string {
 	return response.StopReason
 }
 
-func (s *session) Continue(input string) (driver.RunID, error) {
+func (s *session) Respond(input driver.UserInput) (driver.RunID, error) {
 	ctx := s.ctx
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
@@ -258,7 +260,12 @@ func (s *session) Continue(input string) (driver.RunID, error) {
 		s.mu.Unlock()
 		return "", driver.NewInvalidStateError("acp: session is not blocked")
 	}
-	if _, ok := permission.options[input]; len(permission.options) > 0 && !ok {
+	selection, ok := input.(driver.OptionSelection)
+	if !ok {
+		s.mu.Unlock()
+		return "", driver.NewInvalidStateError("acp: blocked permission requires OptionSelection")
+	}
+	if _, ok := permission.options[selection.Value]; len(permission.options) > 0 && !ok {
 		s.mu.Unlock()
 		return "", driver.NewInvalidStateError("acp: invalid permission response")
 	}
@@ -269,7 +276,7 @@ func (s *session) Continue(input string) (driver.RunID, error) {
 	s.mu.Unlock()
 	s.setState(driver.ProcessState{Phase: driver.PhasePromptInFlight, SessionID: s.SessionID(), RunID: runID})
 
-	payload, err := marshalPermissionResponse(permission.id, "selected", input)
+	payload, err := marshalPermissionResponse(permission.id, "selected", selection.Value)
 	if err == nil {
 		err = s.proc.write(payload)
 	}

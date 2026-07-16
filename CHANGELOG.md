@@ -3,6 +3,8 @@
 ## Unreleased
 
 - Added a machine-readable cross-language contract checked by Go and Python.
+- Replaced public blocked `Continue` with state-aware `Run`/`Stream` accepting
+  `UserMessage` or `OptionSelection`; callers must wrap all submitted input.
 
 ## v0.2.0 - 2026-07-15
 

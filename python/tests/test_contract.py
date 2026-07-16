@@ -9,13 +9,13 @@ from unio._driver import DriverEventType, DriverTransport, FinishReason, Process
 
 
 def _contract() -> dict[str, list[str] | str]:
-    path = Path(__file__).parents[2] / "docs" / "contract-v0.6.json"
+    path = Path(__file__).parents[2] / "docs" / "contract-v0.7.json"
     return cast(dict[str, list[str] | str], json.loads(path.read_text(encoding="utf-8")))
 
 
 def test_frozen_values_match_shared_contract() -> None:
     contract = _contract()
-    assert contract["spec_version"] == "0.6.0"
+    assert contract["spec_version"] == "0.7.0"
     assert [str(item) for item in unio.AgentKind] == contract["agent_kind"]
     assert [str(item) for item in unio.SessionState] == contract["session_state"]
     assert [str(item) for item in unio.BlockedKind] == contract["blocked_kind"]

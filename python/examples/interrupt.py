@@ -6,7 +6,7 @@ import unio
 async def main() -> None:
     async with unio.Agent(unio.Codex, cwd=".") as agent:
         session = agent.new_session()
-        stream = await session.stream("Inspect every file in this repository")
+        stream = await session.stream(unio.UserMessage("Inspect every file in this repository"))
 
         async def stop_soon() -> None:
             await asyncio.sleep(2)

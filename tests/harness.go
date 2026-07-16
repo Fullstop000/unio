@@ -1,5 +1,5 @@
 // Package e2e holds unio's end-to-end tests: full-lifecycle scenarios that drive
-// a real Driver through open → run → prompt → consume the event stream →
+// a real Driver through open → start → send → consume the event stream →
 // cancel → resume (in a fresh session) → close, asserting the SDK does something
 // genuinely useful rather than merely compiling.
 //
@@ -31,8 +31,8 @@ type Harness struct {
 	// FirstPrompt / SecondPrompt are the prompts sent across the two turns.
 	FirstPrompt  string
 	SecondPrompt string
-	// ContinueInput is the value supplied to Continue in BlockedScenario.
-	ContinueInput string
+	// ResponseOption is the advertised option supplied in BlockedScenario.
+	ResponseOption string
 	// Timeout bounds each wait for a terminal event.
 	Timeout time.Duration
 }
@@ -76,16 +76,16 @@ func RunLifecycle(t *testing.T, h Harness) {
 	events := att.Events.Subscribe()
 
 	// --- run brings the session online and attaches a runtime session id ---
-	if err := att.Session.Run(nil); err != nil {
+	if err := att.Session.Start(); err != nil {
 		t.Fatalf("[%s] run: %v", h.Name, err)
 	}
 	firstID := att.Session.SessionID()
 	if firstID == "" {
-		t.Fatalf("[%s] Run should attach a runtime session id", h.Name)
+		t.Fatalf("[%s] Start should attach a runtime session id", h.Name)
 	}
 
 	// --- first prompt: consume the stream through to Completed ---
-	runID, err := att.Session.Prompt(driver.PromptReq{Text: h.FirstPrompt})
+	runID, err := att.Session.Send(driver.UserMessage{Text: h.FirstPrompt})
 	if err != nil {
 		t.Fatalf("[%s] prompt: %v", h.Name, err)
 	}
@@ -103,7 +103,7 @@ func RunLifecycle(t *testing.T, h Harness) {
 		t.Fatalf("[%s] reopen(resume): %v", h.Name, err)
 	}
 	events2 := att2.Events.Subscribe()
-	if err := att2.Session.Run(nil); err != nil {
+	if err := att2.Session.Start(); err != nil {
 		t.Fatalf("[%s] run(resume): %v", h.Name, err)
 	}
 	resumedID := att2.Session.SessionID()
@@ -112,7 +112,7 @@ func RunLifecycle(t *testing.T, h Harness) {
 	}
 
 	// --- second prompt on the resumed session ---
-	runID2, err := att2.Session.Prompt(driver.PromptReq{Text: h.SecondPrompt})
+	runID2, err := att2.Session.Send(driver.UserMessage{Text: h.SecondPrompt})
 	if err != nil {
 		t.Fatalf("[%s] prompt(resume): %v", h.Name, err)
 	}
@@ -164,7 +164,7 @@ func CancelScenario(t *testing.T, h Harness) {
 		t.Fatalf("[%s] open: %v", h.Name, err)
 	}
 	_ = att.Events.Subscribe()
-	if err := att.Session.Run(nil); err != nil {
+	if err := att.Session.Start(); err != nil {
 		t.Fatalf("[%s] run: %v", h.Name, err)
 	}
 	defer att.Session.Close()
@@ -198,15 +198,15 @@ func collectUntilBlockedOrDone(t *testing.T, ch <-chan driver.AgentEvent, runID 
 }
 
 // BlockedScenario drives a turn that blocks awaiting external input, supplies it
-// via Continue, and asserts the resumed turn runs to completion. It is only
+// via Respond, and asserts the resumed turn runs to completion. It is only
 // meaningful for drivers that can be made to block deterministically (the fake);
 // real agents cannot be reliably scripted to request approval.
 func BlockedScenario(t *testing.T, h Harness) {
 	if h.Timeout == 0 {
 		h.Timeout = 10 * time.Second
 	}
-	if h.ContinueInput == "" {
-		t.Fatalf("[%s] BlockedScenario requires Harness.ContinueInput", h.Name)
+	if h.ResponseOption == "" {
+		t.Fatalf("[%s] BlockedScenario requires Harness.ResponseOption", h.Name)
 	}
 	ctx := context.Background()
 	d := h.NewDriver(t, ctx, h.Spec)
@@ -216,12 +216,12 @@ func BlockedScenario(t *testing.T, h Harness) {
 		t.Fatalf("[%s] open: %v", h.Name, err)
 	}
 	events := att.Events.Subscribe()
-	if err := att.Session.Run(nil); err != nil {
+	if err := att.Session.Start(); err != nil {
 		t.Fatalf("[%s] run: %v", h.Name, err)
 	}
 	defer att.Session.Close()
 
-	runID, err := att.Session.Prompt(driver.PromptReq{Text: h.FirstPrompt})
+	runID, err := att.Session.Send(driver.UserMessage{Text: h.FirstPrompt})
 	if err != nil {
 		t.Fatalf("[%s] prompt: %v", h.Name, err)
 	}
@@ -242,9 +242,9 @@ func BlockedScenario(t *testing.T, h Harness) {
 		t.Fatalf("[%s] phase after block = %q; want blocked", h.Name, state)
 	}
 
-	resumeRun, err := att.Session.Continue(h.ContinueInput)
+	resumeRun, err := att.Session.Respond(driver.OptionSelection{Value: h.ResponseOption})
 	if err != nil {
-		t.Fatalf("[%s] continue: %v", h.Name, err)
+		t.Fatalf("[%s] respond: %v", h.Name, err)
 	}
 	resumeEvs := collectUntil(t, events, resumeRun, h.Timeout)
 	assertProducedOutputAndCompleted(t, h.Name, resumeEvs, resumeRun)

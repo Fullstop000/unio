@@ -54,9 +54,9 @@ type nonActiveStateSession struct {
 	runCalls *atomic.Uint64
 }
 
-func (s *nonActiveStateSession) Run(prompt *driver.PromptReq) error {
+func (s *nonActiveStateSession) Start() error {
 	s.runCalls.Add(1)
-	return s.Session.Run(prompt)
+	return s.Session.Start()
 }
 
 func (s *nonActiveStateSession) ProcessState() driver.ProcessState {
@@ -118,7 +118,7 @@ func TestNewSessionStartsIdleWithoutRuntimeID(t *testing.T) {
 func TestRunSetsRuntimeIDAndReturnsToIdle(t *testing.T) {
 	agent := newFakeAgent(t)
 	session, _ := agent.NewSession()
-	result, err := session.Run("hello")
+	result, err := session.Run(Message("hello"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +135,7 @@ func TestRunDoesNotRestartAnAttachedSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, prompt := range []string{"one", "two"} {
-		if _, err := session.Run(prompt); err != nil {
+		if _, err := session.Run(Message(prompt)); err != nil {
 			t.Fatalf("Run(%q): %v", prompt, err)
 		}
 	}
@@ -149,11 +149,11 @@ func TestStreamSubmissionErrorIsDirect(t *testing.T) {
 	session, _ := agent.NewSession()
 	gate := make(chan struct{})
 	agent.driver.(*fake.Driver).ScriptNextSession(fake.Script{Wait: gate})
-	stream, err := session.Stream("one")
+	stream, err := session.Stream(Message("one"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := session.Stream("two"); !errors.Is(err, ErrInvalidState) {
+	if _, err := session.Stream(Message("two")); !errors.Is(err, ErrInvalidState) {
 		t.Fatalf("second Stream error = %v", err)
 	}
 	if err := session.Interrupt(); err != nil {
@@ -206,7 +206,7 @@ func TestListAndGetSessionMaintainsIdentity(t *testing.T) {
 	if first != second || first.ID() != "stored-1" || first.State() != Idle {
 		t.Fatal("GetSession must return the maintained idle handle")
 	}
-	result, err := first.Run("continue")
+	result, err := first.Run(Message("continue"))
 	if err != nil || result.Text == "" || first.ID() != "stored-1" {
 		t.Fatalf("result=%+v id=%q err=%v", result, first.ID(), err)
 	}
@@ -240,7 +240,7 @@ func TestListSessionsFiltersMaintainedHandles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := session.Run("hello"); err != nil {
+	if _, err := session.Run(Message("hello")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -332,7 +332,7 @@ func TestSessionTokenStatistics(t *testing.T) {
 	if state := inner.ProcessState(); state.Phase != driver.PhaseIdle {
 		t.Fatalf("reading persisted data started runtime: state=%+v", state)
 	}
-	result, err := session.Run("continue")
+	result, err := session.Run(Message("continue"))
 	if err != nil || result.SessionID != "stored" {
 		t.Fatalf("run after persisted data read: result=%+v error=%v", result, err)
 	}
@@ -368,7 +368,7 @@ func TestSessionRawDataRequiresRuntimeID(t *testing.T) {
 	}
 }
 
-func TestBlockedContinueReturnsToIdle(t *testing.T) {
+func TestBlockedRunResponseReturnsToIdle(t *testing.T) {
 	fd := fake.New(context.Background(), driver.AgentSpec{})
 	agent := newAgentWithDriver(t, fd)
 	session, _ := agent.NewSession()
@@ -379,19 +379,53 @@ func TestBlockedContinueReturnsToIdle(t *testing.T) {
 		}},
 		fake.Script{Items: []driver.AgentEventItem{{Kind: driver.ItemText, Text: "continued"}}},
 	)
-	blocked, err := session.Run("needs approval")
+	blocked, err := session.Run(Message("needs approval"))
 	if err != nil || blocked.Blocked == nil || session.State() != Blocked {
 		t.Fatalf("result=%+v state=%q err=%v", blocked, session.State(), err)
 	}
-	continued, err := session.Continue("allow_once")
+	stream, err := session.Stream(SelectOption("allow_once"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var streamedText string
+	for stream.Next() {
+		if event := stream.Event(); event.Kind == KindText {
+			streamedText += event.Text
+		}
+	}
+	continued, err := stream.Result()
 	if err != nil || continued.Text != "continued" || session.State() != Idle {
+		t.Fatalf("result=%+v state=%q err=%v", continued, session.State(), err)
+	}
+	if streamedText != continued.Text {
+		t.Fatalf("streamed text %q != result text %q", streamedText, continued.Text)
+	}
+}
+
+func TestBlockedUserMessageReturnsToIdle(t *testing.T) {
+	fd := fake.New(context.Background(), driver.AgentSpec{})
+	agent := newAgentWithDriver(t, fd)
+	session, _ := agent.NewSession()
+	fd.ScriptNextSession(
+		fake.Script{Blocked: &driver.BlockedReason{
+			Kind:    driver.BlockedUserInput,
+			Message: "Which database?",
+		}},
+		fake.Script{Items: []driver.AgentEventItem{{Kind: driver.ItemText, Text: "using PostgreSQL"}}},
+	)
+	blocked, err := session.Run(Message("change the database"))
+	if err != nil || blocked.Blocked == nil || session.State() != Blocked {
+		t.Fatalf("result=%+v state=%q err=%v", blocked, session.State(), err)
+	}
+	continued, err := session.Run(Message("PostgreSQL"))
+	if err != nil || continued.Text != "using PostgreSQL" || session.State() != Idle {
 		t.Fatalf("result=%+v state=%q err=%v", continued, session.State(), err)
 	}
 }
 
-// A failed Continue whose transport is still alive must leave the session
+// A failed blocked response whose transport is still alive must leave the session
 // Blocked so the caller can retry, not silently drop to Idle.
-func TestBlockedContinueErrorStaysBlocked(t *testing.T) {
+func TestBlockedResponseErrorStaysBlocked(t *testing.T) {
 	fd := fake.New(context.Background(), driver.AgentSpec{})
 	agent := newAgentWithDriver(t, fd)
 	session, _ := agent.NewSession()
@@ -402,26 +436,26 @@ func TestBlockedContinueErrorStaysBlocked(t *testing.T) {
 		}},
 		fake.Script{Items: []driver.AgentEventItem{{Kind: driver.ItemText, Text: "continued"}}},
 	)
-	if blocked, err := session.Run("needs approval"); err != nil || blocked.Blocked == nil {
+	if blocked, err := session.Run(Message("needs approval")); err != nil || blocked.Blocked == nil {
 		t.Fatalf("blocked result=%+v err=%v", blocked, err)
 	}
-	// An invalid option makes the driver reject Continue without tearing down
+	// An invalid option makes the driver reject the response without tearing down
 	// the still-blocked transport.
-	if _, err := session.Continue("not_an_option"); err == nil {
-		t.Fatal("Continue accepted an invalid option")
+	if _, err := session.Run(SelectOption("not_an_option")); err == nil {
+		t.Fatal("Run accepted an invalid blocked option")
 	}
 	if session.State() != Blocked {
-		t.Fatalf("state after failed Continue = %q; want blocked", session.State())
+		t.Fatalf("state after failed response = %q; want blocked", session.State())
 	}
 	// The turn is still resumable with a valid option.
-	continued, err := session.Continue("allow_once")
+	continued, err := session.Run(SelectOption("allow_once"))
 	if err != nil || continued.Text != "continued" || session.State() != Idle {
 		t.Fatalf("retry result=%+v state=%q err=%v", continued, session.State(), err)
 	}
 }
 
-// A turn may block, be continued, and block again before finally completing.
-func TestBlockedContinueBlocksAgain(t *testing.T) {
+// A turn may block, be answered, and block again before finally completing.
+func TestBlockedResponseBlocksAgain(t *testing.T) {
 	fd := fake.New(context.Background(), driver.AgentSpec{})
 	agent := newAgentWithDriver(t, fd)
 	session, _ := agent.NewSession()
@@ -434,26 +468,68 @@ func TestBlockedContinueBlocksAgain(t *testing.T) {
 		block,
 		fake.Script{Items: []driver.AgentEventItem{{Kind: driver.ItemText, Text: "done"}}},
 	)
-	if first, err := session.Run("step one"); err != nil || first.Blocked == nil || session.State() != Blocked {
+	if first, err := session.Run(Message("step one")); err != nil || first.Blocked == nil || session.State() != Blocked {
 		t.Fatalf("first block result=%+v state=%q err=%v", first, session.State(), err)
 	}
-	second, err := session.Continue("allow_once")
+	second, err := session.Run(SelectOption("allow_once"))
 	if err != nil || second.Blocked == nil || session.State() != Blocked {
 		t.Fatalf("second block result=%+v state=%q err=%v", second, session.State(), err)
 	}
-	final, err := session.Continue("allow_once")
+	final, err := session.Run(SelectOption("allow_once"))
 	if err != nil || final.Text != "done" || session.State() != Idle {
 		t.Fatalf("final result=%+v state=%q err=%v", final, session.State(), err)
 	}
 }
 
-// Continue rejects an idle session and an agent that has been closed.
-func TestContinueGuards(t *testing.T) {
+// Input validation rejects an option on an idle session and any input after close.
+func TestRunInputGuards(t *testing.T) {
 	t.Run("idle session", func(t *testing.T) {
 		agent := newFakeAgent(t)
 		session, _ := agent.NewSession()
-		if _, err := session.Continue("anything"); !errors.Is(err, ErrInvalidState) {
-			t.Fatalf("Continue on idle session error = %v; want invalid state", err)
+		if _, err := session.Run(SelectOption("anything")); !errors.Is(err, ErrInvalidState) {
+			t.Fatalf("option on idle session error = %v; want invalid state", err)
+		}
+		if session.State() != Idle {
+			t.Fatalf("state after rejected idle option = %q; want idle", session.State())
+		}
+		if session.ID() != "" {
+			t.Fatalf("rejected idle option attached runtime session %q", session.ID())
+		}
+		if result, err := session.Run(Message("retry")); err != nil || result.Text != "echo: retry" {
+			t.Fatalf("retry after rejected idle option: result=%+v err=%v", result, err)
+		}
+	})
+	t.Run("blocked option requires selection", func(t *testing.T) {
+		fd := fake.New(context.Background(), driver.AgentSpec{})
+		agent := newAgentWithDriver(t, fd)
+		session, _ := agent.NewSession()
+		fd.ScriptNextSession(fake.Script{Blocked: &driver.BlockedReason{
+			Kind:    driver.BlockedToolApproval,
+			Options: []driver.BlockOption{{Value: "allow_once", Label: "Allow once"}},
+		}})
+		if blocked, err := session.Run(Message("block")); err != nil || blocked.Blocked == nil {
+			t.Fatalf("blocked result=%+v err=%v", blocked, err)
+		}
+		if _, err := session.Run(Message("allow_once")); !errors.Is(err, ErrInvalidState) {
+			t.Fatalf("message for blocked option error = %v; want invalid state", err)
+		}
+		if session.State() != Blocked {
+			t.Fatalf("state after rejected blocked message = %q; want blocked", session.State())
+		}
+	})
+	t.Run("blocked user input requires message", func(t *testing.T) {
+		fd := fake.New(context.Background(), driver.AgentSpec{})
+		agent := newAgentWithDriver(t, fd)
+		session, _ := agent.NewSession()
+		fd.ScriptNextSession(fake.Script{Blocked: &driver.BlockedReason{Kind: driver.BlockedUserInput}})
+		if blocked, err := session.Run(Message("block")); err != nil || blocked.Blocked == nil {
+			t.Fatalf("blocked result=%+v err=%v", blocked, err)
+		}
+		if _, err := session.Run(SelectOption("reply")); !errors.Is(err, ErrInvalidState) {
+			t.Fatalf("option for blocked user input error = %v; want invalid state", err)
+		}
+		if session.State() != Blocked {
+			t.Fatalf("state after rejected blocked option = %q; want blocked", session.State())
 		}
 	})
 	t.Run("closed agent", func(t *testing.T) {
@@ -461,14 +537,14 @@ func TestContinueGuards(t *testing.T) {
 		agent := newAgentWithDriver(t, fd)
 		session, _ := agent.NewSession()
 		fd.ScriptNextSession(fake.Script{Blocked: &driver.BlockedReason{Kind: driver.BlockedToolApproval}})
-		if blocked, err := session.Run("block"); err != nil || blocked.Blocked == nil {
+		if blocked, err := session.Run(Message("block")); err != nil || blocked.Blocked == nil {
 			t.Fatalf("blocked result=%+v err=%v", blocked, err)
 		}
 		if err := agent.Close(); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := session.Continue("allow_once"); !errors.Is(err, ErrInvalidState) {
-			t.Fatalf("Continue after agent close error = %v; want invalid state", err)
+		if _, err := session.Run(SelectOption("allow_once")); !errors.Is(err, ErrInvalidState) {
+			t.Fatalf("Run after agent close error = %v; want invalid state", err)
 		}
 	})
 }
@@ -482,7 +558,7 @@ func TestInterruptReturnsPartialResult(t *testing.T) {
 		Items: []driver.AgentEventItem{{Kind: driver.ItemText, Text: "partial"}},
 		Wait:  gate,
 	})
-	stream, err := session.Stream("long")
+	stream, err := session.Stream(Message("long"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -529,7 +605,7 @@ func TestAgentContextCancellationStopsDerivedSession(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := session.Run("long")
+		_, err := session.Run(Message("long"))
 		done <- err
 	}()
 	waitDriverPhase(t, session, driver.PhasePromptInFlight)
@@ -628,7 +704,7 @@ func (s *staleAttachmentSession) markStale() {
 	s.mu.Unlock()
 }
 
-func (s *staleAttachmentSession) Prompt(req driver.PromptReq) (driver.RunID, error) {
+func (s *staleAttachmentSession) Send(input driver.UserInput) (driver.RunID, error) {
 	s.mu.Lock()
 	fail := s.failPrompt
 	s.failPrompt = false
@@ -639,7 +715,7 @@ func (s *staleAttachmentSession) Prompt(req driver.PromptReq) (driver.RunID, err
 	if fail {
 		return driver.NewRunID(), driver.NewTransportError("forced closed transport")
 	}
-	return s.Session.Prompt(req)
+	return s.Session.Send(input)
 }
 
 func (d *recordingOpenDriver) OpenSession(params driver.OpenParams) (*driver.SessionAttachment, error) {
@@ -664,10 +740,10 @@ type blockingPromptSession struct {
 	release chan struct{}
 }
 
-func (s *blockingPromptSession) Prompt(req driver.PromptReq) (driver.RunID, error) {
+func (s *blockingPromptSession) Send(input driver.UserInput) (driver.RunID, error) {
 	close(s.started)
 	<-s.release
-	return s.Session.Prompt(req)
+	return s.Session.Send(input)
 }
 
 func (d *blockingOpenDriver) OpenSession(params driver.OpenParams) (*driver.SessionAttachment, error) {
@@ -689,7 +765,7 @@ func TestAgentCloseCannotRaceInANewAttachment(t *testing.T) {
 	session, _ := agent.NewSession()
 	done := make(chan error, 1)
 	go func() {
-		_, err := session.Run("hello")
+		_, err := session.Run(Message("hello"))
 		done <- err
 	}()
 	<-blocking.started
@@ -726,7 +802,7 @@ func TestAgentCloseWaitsForPromptSubmission(t *testing.T) {
 	session, _ := agent.NewSession()
 	streamDone := make(chan error, 1)
 	go func() {
-		_, err := session.Stream("hello")
+		_, err := session.Stream(Message("hello"))
 		streamDone <- err
 	}()
 	<-blocking.started
@@ -760,7 +836,7 @@ func TestInterruptWaitsForPromptSubmission(t *testing.T) {
 	session, _ := agent.NewSession()
 	streamDone := make(chan *Stream, 1)
 	go func() {
-		stream, _ := session.Stream("hello")
+		stream, _ := session.Stream(Message("hello"))
 		streamDone <- stream
 	}()
 	<-blocking.started
@@ -795,7 +871,7 @@ func TestTransportClosedTurnReturnsError(t *testing.T) {
 	agent := newAgentWithDriver(t, fd)
 	session, _ := agent.NewSession()
 	fd.ScriptNextSession(fake.Script{Result: driver.RunResult{FinishReason: driver.FinishTransportClosed}})
-	_, err := session.Run("hello")
+	_, err := session.Run(Message("hello"))
 	if kind, ok := errs.KindOf(err); !ok || kind != errs.KindTransport {
 		t.Fatalf("error = %v; want transport", err)
 	}
@@ -807,20 +883,20 @@ func TestInterruptedStreamMustFinishBeforeNextTurn(t *testing.T) {
 	agent := newAgentWithDriver(t, fd)
 	session, _ := agent.NewSession()
 	fd.ScriptNextSession(fake.Script{Wait: gate})
-	first, err := session.Stream("long")
+	first, err := session.Stream(Message("long"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := session.Interrupt(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := session.Stream("too early"); !errors.Is(err, ErrInvalidState) {
+	if _, err := session.Stream(Message("too early")); !errors.Is(err, ErrInvalidState) {
 		t.Fatalf("new turn before interrupted stream terminal = %v", err)
 	}
 	if _, err := first.Result(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := session.Run("now allowed"); err != nil {
+	if _, err := session.Run(Message("now allowed")); err != nil {
 		t.Fatal(err)
 	}
 	close(gate)
@@ -863,7 +939,7 @@ func TestGetSessionUsesPersistedCwdForResume(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := session.Run("continue"); err != nil {
+	if _, err := session.Run(Message("continue")); err != nil {
 		t.Fatal(err)
 	}
 	recording.mu.Lock()
@@ -886,14 +962,14 @@ func TestRunReattachesAClosedDriverSession(t *testing.T) {
 	}
 	defer agent.Close()
 	session, _ := agent.NewSession()
-	if _, err := session.Run("first"); err != nil {
+	if _, err := session.Run(Message("first")); err != nil {
 		t.Fatal(err)
 	}
 	staleDriver.mu.Lock()
 	first := staleDriver.latest
 	staleDriver.mu.Unlock()
 	first.markStale()
-	if _, err := session.Run("second"); err != nil {
+	if _, err := session.Run(Message("second")); err != nil {
 		t.Fatal(err)
 	}
 	staleDriver.mu.Lock()
@@ -904,7 +980,7 @@ func TestRunReattachesAClosedDriverSession(t *testing.T) {
 	}
 }
 
-func TestContinueDropsAClosedBlockedAttachment(t *testing.T) {
+func TestBlockedResponseDropsAClosedAttachment(t *testing.T) {
 	fd := fake.New(context.Background(), driver.AgentSpec{})
 	staleDriver := &staleAttachmentDriver{Driver: fd}
 	prev := driverOverride
@@ -917,20 +993,20 @@ func TestContinueDropsAClosedBlockedAttachment(t *testing.T) {
 	defer agent.Close()
 	session, _ := agent.NewSession()
 	fd.ScriptNextSession(fake.Script{Blocked: &driver.BlockedReason{Kind: driver.BlockedToolApproval}})
-	if result, err := session.Run("block"); err != nil || result.Blocked == nil {
+	if result, err := session.Run(Message("block")); err != nil || result.Blocked == nil {
 		t.Fatalf("blocked result=%+v err=%v", result, err)
 	}
 	staleDriver.mu.Lock()
 	first := staleDriver.latest
 	staleDriver.mu.Unlock()
 	first.markStale()
-	if _, err := session.Continue("allow_once"); err == nil {
-		t.Fatal("Continue accepted a closed blocked attachment")
+	if _, err := session.Run(SelectOption("allow_once")); err == nil {
+		t.Fatal("Run accepted input for a closed blocked attachment")
 	}
 	if session.State() != Idle {
-		t.Fatalf("state after stale Continue = %q; want idle", session.State())
+		t.Fatalf("state after stale blocked response = %q; want idle", session.State())
 	}
-	if _, err := session.Run("recover"); err != nil {
+	if _, err := session.Run(Message("recover")); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -947,10 +1023,10 @@ func TestPromptErrorDropsAClosedAttachment(t *testing.T) {
 	}
 	defer agent.Close()
 	session, _ := agent.NewSession()
-	if _, err := session.Run("fails"); err == nil {
+	if _, err := session.Run(Message("fails")); err == nil {
 		t.Fatal("first Run unexpectedly succeeded")
 	}
-	if _, err := session.Run("recovers"); err != nil {
+	if _, err := session.Run(Message("recovers")); err != nil {
 		t.Fatal(err)
 	}
 	staleDriver.mu.Lock()

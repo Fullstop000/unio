@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from .errors import AgentError, not_installed
-from .models import BlockedReason, RawSessionData, TokenStatistics, TokenUsage
+from .models import BlockedReason, RawSessionData, TokenStatistics, TokenUsage, UserInput
 
 
 class ProcessPhase(StrEnum):
@@ -172,10 +172,10 @@ class DriverSession(ABC):
     async def start(self) -> None: ...
 
     @abstractmethod
-    async def prompt(self, text: str) -> str: ...
+    async def send(self, value: UserInput) -> str: ...
 
     @abstractmethod
-    async def continue_(self, value: str) -> str: ...
+    async def respond(self, value: UserInput) -> str: ...
 
     @abstractmethod
     async def interrupt(self) -> None: ...

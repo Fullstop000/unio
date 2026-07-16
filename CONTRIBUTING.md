@@ -57,7 +57,7 @@ UNIO_RUN_REAL_E2E=1 pytest -s tests/e2e_real
 ```
 
 Run the relevant real tests when changing runtime discovery, protocols,
-session lifecycle, streaming, interruption, blocking, continuation, or session
+session lifecycle, streaming, interruption, blocking, blocked responses, or session
 history parsing. In the pull request, list the runtimes and CLI versions tested.
 If real tests were not run, say so explicitly and explain why.
 
@@ -79,7 +79,7 @@ blocked reason, error kind, data format, or other observable behavior requires:
 
 - a specification version bump;
 - matching implementation and tests;
-- a matching update to `docs/contract-v0.6.json` (renamed for the new spec
+- a matching update to `docs/contract-v0.7.json` (renamed for the new spec
   version) and passing contract tests in both SDKs;
 - an update to `docs/API_SUPPORT.md` when runtime support differs; and
 - a clear compatibility note in the pull request and changelog when existing

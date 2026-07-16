@@ -11,7 +11,7 @@ import (
 )
 
 func TestFrozenValuesMatchContractManifest(t *testing.T) {
-	data, err := os.ReadFile("docs/contract-v0.6.json")
+	data, err := os.ReadFile("docs/contract-v0.7.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,7 +31,7 @@ func TestFrozenValuesMatchContractManifest(t *testing.T) {
 	if err := json.Unmarshal(data, &contract); err != nil {
 		t.Fatal(err)
 	}
-	if contract.SpecVersion != "0.6.0" {
+	if contract.SpecVersion != "0.7.0" {
 		t.Fatalf("unexpected spec version %q", contract.SpecVersion)
 	}
 	checks := map[string]struct {

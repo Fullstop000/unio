@@ -127,10 +127,10 @@ func TestClaudeDriverFullTurn(t *testing.T) {
 	}
 	ch := att.Events.Subscribe()
 
-	if err := att.Session.Run(nil); err != nil {
+	if err := att.Session.Start(); err != nil {
 		t.Fatal(err)
 	}
-	runID, err := att.Session.Prompt(driver.PromptReq{Text: "read main.go"})
+	runID, err := att.Session.Send(driver.UserMessage{Text: "read main.go"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,8 +204,8 @@ func TestClaudeDriverErrorResult(t *testing.T) {
 		t.Fatal(err)
 	}
 	ch := att.Events.Subscribe()
-	_ = att.Session.Run(nil)
-	runID, _ := att.Session.Prompt(driver.PromptReq{Text: "x"})
+	_ = att.Session.Start()
+	runID, _ := att.Session.Send(driver.UserMessage{Text: "x"})
 	go tr.feed()
 
 	evs := collect(t, ch, func(ev driver.AgentEvent) bool {
@@ -236,10 +236,10 @@ func TestClaudeInterruptKillsTurnAsCancelled(t *testing.T) {
 		t.Fatal(err)
 	}
 	events := att.Events.Subscribe()
-	if err := att.Session.Run(nil); err != nil {
+	if err := att.Session.Start(); err != nil {
 		t.Fatal(err)
 	}
-	run, err := att.Session.Prompt(driver.PromptReq{Text: "long"})
+	run, err := att.Session.Send(driver.UserMessage{Text: "long"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -272,10 +272,10 @@ func TestClaudePromptRejectsShortWrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := att.Session.Run(nil); err != nil {
+	if err := att.Session.Start(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := att.Session.Prompt(driver.PromptReq{Text: "hello"}); err == nil {
+	if _, err := att.Session.Send(driver.UserMessage{Text: "hello"}); err == nil {
 		t.Fatal("short JSONL write was accepted")
 	}
 }
@@ -289,7 +289,7 @@ func TestClaudeCloseWaitsForReapAfterLifecycleCancellation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := att.Session.Run(nil); err != nil {
+	if err := att.Session.Start(); err != nil {
 		t.Fatal(err)
 	}
 	cancel()
@@ -318,7 +318,7 @@ func TestClaudeProcessLifetimeDoesNotUseTurnContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := att.Session.Run(nil); err != nil {
+	if err := att.Session.Start(); err != nil {
 		t.Fatal(err)
 	}
 	cancel()
@@ -358,8 +358,8 @@ func TestClaudeDriverNonStreamingCompleteMessage(t *testing.T) {
 		t.Fatal(err)
 	}
 	ch := att.Events.Subscribe()
-	_ = att.Session.Run(nil)
-	runID, _ := att.Session.Prompt(driver.PromptReq{Text: "hi"})
+	_ = att.Session.Start()
+	runID, _ := att.Session.Send(driver.UserMessage{Text: "hi"})
 	go tr.feed()
 
 	evs := collect(t, ch, func(ev driver.AgentEvent) bool {

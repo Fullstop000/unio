@@ -54,7 +54,7 @@ func main() {
 				results <- outcome{agent: a, err: err}
 				return
 			}
-			res, err := session.Run(prompt)
+			res, err := session.Run(unio.Message(prompt))
 			results <- outcome{agent: a, res: res, err: err}
 		}(a)
 	}

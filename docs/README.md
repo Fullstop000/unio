@@ -9,7 +9,7 @@ successful turn. The remaining documents each have one source-of-truth role:
   context cancellation, blocked turns, and interruption.
 - [Behavior specification](SPEC.md): normative, language-neutral API behavior
   and frozen contract values.
-- [Machine-readable contract](contract-v0.6.json): frozen values checked by all
+- [Machine-readable contract](contract-v0.7.json): frozen values checked by all
   language implementations.
 - [Python SDK](../python/README.md): install, API guide, examples, and Python
   release lifecycle.

@@ -79,7 +79,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	result, err := session.Run("Explain this repository")
+	result, err := session.Run(unio.Message("Explain this repository"))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -92,7 +92,7 @@ comes from the selected runtime:
 
 ```go
 session.ID() // ""
-_, _ = session.Run("Start a plan")
+_, _ = session.Run(unio.Message("Start a plan"))
 session.ID() // runtime-owned ID
 ```
 
@@ -133,7 +133,7 @@ See the runnable [stream and interrupt example](examples/stream/main.go).
 ## Stream events
 
 ```go
-stream, err := session.Stream("Refactor the authentication module")
+stream, err := session.Stream(unio.Message("Refactor the authentication module"))
 if err != nil {
 	return err
 }
@@ -162,15 +162,18 @@ A blocked turn returns `err == nil`, sets `Result.Blocked`, and leaves the
 Session blocked. A runtime can block more than once:
 
 ```go
-result, err := session.Run("Apply the change")
+result, err := session.Run(unio.Message("Apply the change"))
 if err != nil {
 	return err
 }
 for result.Blocked != nil {
-	if len(result.Blocked.Options) == 0 {
-		return fmt.Errorf("agent needs input: %s", result.Blocked.Message)
+	var input unio.UserInput
+	if len(result.Blocked.Options) > 0 {
+		input = unio.SelectOption(result.Blocked.Options[0].Value)
+	} else {
+		input = unio.Message("caller-provided response")
 	}
-	result, err = session.Continue(result.Blocked.Options[0].Value)
+	result, err = session.Run(input)
 	if err != nil {
 		return err
 	}
@@ -195,7 +198,7 @@ session, err := agent.GetSession(sessions[0].ID)
 if err != nil {
 	return err
 }
-result, err := session.Run("Continue the previous work")
+result, err := session.Run(unio.Message("Continue the previous work"))
 ```
 
 `ListSessions` defaults to the Agent working directory. `SessionsIn(dir)`

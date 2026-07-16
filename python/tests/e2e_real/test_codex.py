@@ -49,10 +49,15 @@ def test_real_codex_stream_persistence_and_resume(tmp_path: Path) -> None:
         session_id = ""
         async with unio.Agent(unio.Codex, cwd=tmp_path) as agent:
             session = agent.new_session()
-            stream = await session.stream("Reply with exactly: PYTHON_E2E_PONG")
+            stream = await session.stream(unio.UserMessage("Reply with exactly: PYTHON_E2E_PONG"))
             events = [event async for event in stream]
             result = await stream.result()
-            assert result.text.strip()
+            streamed_text = "".join(
+                event.text for event in events if event.kind is unio.EventKind.TEXT
+            )
+            assert events
+            assert streamed_text == result.text
+            assert result.text.strip() == "PYTHON_E2E_PONG"
             assert session.id
             assert result.session_id == session.id
             session_id = session.id
@@ -85,8 +90,8 @@ def test_real_codex_stream_persistence_and_resume(tmp_path: Path) -> None:
             sessions = await resumed_agent.list_sessions()
             assert any(item.id == session_id for item in sessions)
             resumed = await resumed_agent.get_session(session_id)
-            result = await resumed.run("Reply with exactly: PYTHON_E2E_RESUMED")
-            assert result.text.strip()
+            result = await resumed.run(unio.UserMessage("Reply with exactly: PYTHON_E2E_RESUMED"))
+            assert result.text.strip() == "PYTHON_E2E_RESUMED"
             assert resumed.id == session_id
             print(
                 "E2E resume:",
@@ -107,15 +112,17 @@ def test_real_codex_interrupt_and_reuse(tmp_path: Path) -> None:
         async with unio.Agent(unio.Codex, cwd=tmp_path) as agent:
             session = agent.new_session()
             stream = await session.stream(
-                "Use the shell tool to run exactly `sleep 30`, then reply with done."
+                unio.UserMessage(
+                    "Use the shell tool to run exactly `sleep 30`, then reply with done."
+                )
             )
             await asyncio.sleep(2)
             await session.interrupt()
             interrupted = await asyncio.wait_for(stream.result(), timeout=60)
             assert interrupted.interrupted
 
-            follow_up = await session.run("Reply with exactly: PYTHON_E2E_OK")
-            assert follow_up.text.strip()
+            follow_up = await session.run(unio.UserMessage("Reply with exactly: PYTHON_E2E_OK"))
+            assert follow_up.text.strip() == "PYTHON_E2E_OK"
             print(
                 "E2E interrupt:",
                 json.dumps(

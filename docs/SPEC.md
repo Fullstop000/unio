@@ -4,7 +4,7 @@ This specification defines the language-neutral behavior shared by the Go and
 Python SDKs. Implementations preserve the same observable contract even when
 language idioms and runtime protocols differ.
 
-**Spec version: 0.6.0**
+**Spec version: 0.7.0**
 
 ## 1. Public object model
 
@@ -17,7 +17,7 @@ language idioms and runtime protocols differ.
 The common flow is:
 
 ```text
-New Agent -> NewSession/GetSession -> Run/Stream -> Interrupt/Continue
+New Agent -> NewSession/GetSession -> Run/Stream -> Interrupt
 ```
 
 Runtime attach and resume are automatic. There is no public `Session.Close` or
@@ -26,7 +26,7 @@ Runtime attach and resume are automatic. There is no public `Session.Close` or
 ## 2. Frozen values
 
 The machine-readable mirror used by implementation tests is
-[`contract-v0.6.json`](contract-v0.6.json). This document remains normative.
+[`contract-v0.7.json`](contract-v0.7.json). This document remains normative.
 
 ### Agent kind
 
@@ -108,14 +108,24 @@ next `Run` or `Stream` attaches or resumes automatically.
 
 ### Run and stream
 
-`Run` waits for a turn. `Stream` exposes text, thinking, tool calls, and tool
-results before returning the same final Result semantics.
+`Run` waits for a submission. `Stream` exposes text, thinking, tool calls, and
+tool results before returning the same final Result semantics. Both accept the
+same `UserInput` sum type:
+
+- `UserMessage`: natural-language user input;
+- `OptionSelection`: the value of an option advertised by `Result.Blocked`.
+
+Session state selects the operation. On an idle Session, `UserMessage` starts a
+new runtime turn. On a blocked Session, the input answers the pending
+interaction. A blocked interaction with options requires `OptionSelection`; a
+free-form interaction without options requires `UserMessage`.
 
 Submission errors are returned by `Stream` directly. A stream object must never
 be returned with an error hidden inside it.
 
-Only one turn may run per Session. A concurrent `Run`, `Stream`, or invalid
-`Continue` returns `invalid_state`.
+Only one turn may run per Session. A concurrent submission or an input variant
+that is incompatible with the current state returns `invalid_state` and leaves
+the Session in its previous usable state.
 
 ### Interrupt
 
@@ -131,14 +141,15 @@ the Agent lifecycle terminates the Agent instead of acting as a reusable
 per-turn interruption. For a manual Stream, the Session remains running until
 that Stream consumes its terminal event; a new turn is rejected before then.
 
-### Block and continue
+### Block and respond
 
 A blocked turn returns immediately with `Result.Blocked` and leaves the Session
 in `blocked`. Blocking is normal control flow, not an error.
 
-`BlockedReason.Options` is best-effort. `Continue` accepts an advertised option
-value or free-form input when no options are available, then moves the Session
-back to running.
+`BlockedReason.Options` is best-effort. Callers respond through `Run` or
+`Stream`: submit `OptionSelection` for an advertised value, or `UserMessage`
+when no options are available. A valid response moves the Session back to
+running.
 
 Partial text, thinking, tool calls, and usage produced before blocking or
 interruption remain in the Result.
@@ -168,8 +179,9 @@ Drivers emit:
 session_attached -> output* -> blocked | completed | failed
 ```
 
-`Continue` starts a new SDK correlation run while the runtime may continue the
-same native turn. Every output or terminal event carries its SDK run ID.
+Responding to a blocked interaction starts a new SDK correlation run while the
+runtime may continue the same native turn. Every output or terminal event
+carries its SDK run ID.
 
 Driver sessions are concurrency-safe. Lifecycle mutation is serialized only
 around request/acknowledgment windows so Interrupt remains available while a
