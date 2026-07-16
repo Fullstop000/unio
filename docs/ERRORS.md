@@ -1,11 +1,27 @@
 # Error handling
 
-unio returns typed SDK errors from `github.com/Fullstop000/unio/errs`. Match an
-error by its `ErrorKind`; error messages contain runtime-specific diagnostic
-details and are not a stable API.
+unio returns typed SDK errors in every language. Match an error by its
+`ErrorKind`; error messages contain runtime-specific diagnostic details and are
+not a stable API.
+
+Python:
+
+```python
+try:
+    result = await session.run(unio.UserMessage("Explain this repository"))
+except unio.AgentError as error:
+    if error.kind is unio.ErrorKind.NOT_INSTALLED:
+        print("Install the selected agent CLI")
+    elif error.kind is unio.ErrorKind.UNSUPPORTED:
+        print("Choose a supported runtime or operation")
+    else:
+        print(f"agent failed ({error.kind}): {error.message}")
+```
+
+Go:
 
 ```go
-result, err := session.Run("Explain this repository")
+result, err := session.Run(unio.Message("Explain this repository"))
 if err != nil {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return err
@@ -33,7 +49,7 @@ fmt.Println(result.Text)
 | Kind | Meaning | Common caller action | Retry guidance |
 | --- | --- | --- | --- |
 | `not_installed` | The selected CLI executable cannot be found. | Install the CLI or correct `PATH`/the configured executable. | Retry after fixing the installation. |
-| `invalid_state` | The operation is not valid for the current Agent or Session state. Examples include starting a second turn on one Session or calling `Continue` while it is not blocked. | Inspect `Session.State`, finish the active `Stream`, or use a different Session. | Do not retry unchanged. |
+| `invalid_state` | The operation is not valid for the current Agent or Session state. Examples include starting a second turn or submitting an option while the Session is idle. | Inspect `Session.State`, finish the active `Stream`, or submit the input variant required by the current state. | Do not retry unchanged. |
 | `session_not_found` | The runtime-owned session ID does not exist in the selected runtime's history. | Refresh `ListSessions`, choose another ID, or create a new Session. | Retry only with a valid ID. |
 | `unsupported` | The selected runtime or its advertised capabilities do not implement the operation. | Check the [support matrix](API_SUPPORT.md) and choose another runtime or operation. | Do not retry unchanged. |
 | `runtime_reported` | The CLI accepted the request but reported a domain failure, such as authentication, model, quota, or turn failure. | Inspect the message and the CLI's own authentication/configuration. | Depends on the runtime error. |
@@ -47,15 +63,18 @@ system if prompts, paths, command output, or credentials may be sensitive.
 
 ## Where errors surface
 
+The operation names below use Go spelling; Python exposes the same operations
+as `Agent(...)`, `list_sessions`, `get_session`, `new_session`, `run`, `stream`,
+`interrupt`, `raw`, and `token_statistics`.
+
 | Operation | Typical failures |
 | --- | --- |
 | `unio.New` | A cancelled parent context, unknown Agent kind, or `not_installed`. `New` currently verifies executable discovery; authentication and model errors may surface on the first runtime operation. |
 | `Agent.ListSessions` | `unsupported`, `transport`, `protocol`, or a context error while starting/querying the runtime. |
 | `Agent.GetSession` | `session_not_found`, `unsupported`, or an error from listing runtime history. It does not contact the live runtime to resume the session. |
 | `Agent.NewSession` | `invalid_state` or a context error after the Agent has closed. |
-| `Session.Run` / `Session.Stream` / `Stream.Result` | `invalid_state`, runtime/transport/protocol failures, or a context error. A returned `Result` may contain partial text, thinking, and tool calls produced before the error. |
+| `Session.Run` / `Session.Stream` / `Stream.Result` | `invalid_state` for concurrent or state-incompatible input, runtime/transport/protocol failures, or a context error. A returned `Result` may contain partial text, thinking, and tool calls produced before the error. |
 | `Session.Interrupt` | A transport error when the runtime cannot confirm interruption. Calling it while idle is a successful no-op. |
-| `Session.Continue` | `invalid_state` unless the Session is blocked; otherwise the same runtime and transport failures as a turn. |
 | `Session.Raw` / `Session.TokenStatistics` | `invalid_state` for an active or ID-less Session, `unsupported` for runtimes without persisted data, `session_not_found`, `transport`, or `protocol`. |
 
 The context passed to `unio.New` owns the entire Agent lifecycle. Cancelling it
@@ -63,14 +82,21 @@ can make an in-flight operation return `context.Canceled` or
 `context.DeadlineExceeded`; these are standard Go context errors, not unio
 `ErrorKind` values. Check them with `errors.Is` before calling `errs.KindOf`.
 
+In Python, `asyncio.CancelledError` remains normal asyncio cancellation rather
+than an `AgentError`; cancelling a task while it consumes a Stream asks the
+runtime to interrupt that turn. An invalid `AgentKind` string raises
+`ValueError`. `Agent.close()` can raise `ExceptionGroup` when multiple Session
+cleanups fail. Use `unio.kind_of(error)` to find a nested `AgentError` category
+when an exception has been chained.
+
 ## Normal control flow is not an error
 
 A blocked turn returns `err == nil`, sets `Result.Blocked`, and leaves the
-Session in `unio.Blocked`. Supply an advertised option value (or free-form input
-when no options are advertised) to `Session.Continue`.
+Session in `unio.Blocked`. Submit `SelectOption(value)` for an advertised option,
+or `Message(text)` when no options are advertised, through the same `Run` API.
 
 ```go
-result, err := session.Run("Apply the change")
+result, err := session.Run(unio.Message("Apply the change"))
 if err != nil {
 	return err
 }
@@ -78,7 +104,7 @@ for result.Blocked != nil {
 	if len(result.Blocked.Options) == 0 {
 		return fmt.Errorf("agent needs input: %s", result.Blocked.Message)
 	}
-	result, err = session.Continue(result.Blocked.Options[0].Value)
+	result, err = session.Run(unio.SelectOption(result.Blocked.Options[0].Value))
 	if err != nil {
 		return err
 	}
@@ -111,3 +137,6 @@ if errors.Is(err, unio.ErrInvalidState) {
 ```
 
 Wrapping an error with `%w` preserves all of these matching behaviors.
+
+Python exception chaining with `raise ... from error` is likewise understood by
+`unio.kind_of`.

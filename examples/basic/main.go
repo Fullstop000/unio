@@ -24,7 +24,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	res, err := session.Run("Reply with exactly one word: ping")
+	res, err := session.Run(unio.Message("Reply with exactly one word: ping"))
 	if err != nil {
 		log.Fatal(err)
 	}

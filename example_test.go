@@ -21,7 +21,7 @@ func Example() {
 	if err != nil {
 		return
 	}
-	result, err := session.Run("Explain this repository")
+	result, err := session.Run(unio.Message("Explain this repository"))
 	if err != nil {
 		return
 	}

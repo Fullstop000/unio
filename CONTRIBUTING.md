@@ -1,13 +1,15 @@
 # Contributing to unio
 
-Thanks for helping improve unio. The project is a pre-1.0 Go SDK that presents
-one public API over several independently evolving coding-agent CLIs. Changes
+Thanks for helping improve unio. The project is a pre-1.0 Go and Python SDK
+family that presents one public API over several independently evolving
+coding-agent CLIs. Changes
 should stay small, prove their user-visible behavior, and keep runtime-specific
 differences explicit.
 
 ## Prerequisites
 
 - Go 1.23 or newer.
+- Python 3.11 or newer for Python SDK changes.
 - Git.
 - An agent CLI is not required for unit tests.
 - Real end-to-end tests require the relevant CLI to be installed and
@@ -31,14 +33,31 @@ go test -race ./...
 
 `go test -race ./...` also compiles the packages and examples.
 
+For Python SDK changes:
+
+```sh
+cd python
+python -m venv .venv
+. .venv/bin/activate
+python -m pip install -e '.[dev]'
+ruff format --check .
+ruff check .
+pyright
+pytest
+python -m build
+twine check dist/*
+```
+
 Real runtime tests are opt-in:
 
 ```sh
 go test -tags e2e_real ./tests/...
+cd python
+UNIO_RUN_REAL_E2E=1 pytest -s tests/e2e_real
 ```
 
 Run the relevant real tests when changing runtime discovery, protocols,
-session lifecycle, streaming, interruption, blocking, continuation, or session
+session lifecycle, streaming, interruption, blocking, blocked responses, or session
 history parsing. In the pull request, list the runtimes and CLI versions tested.
 If real tests were not run, say so explicitly and explain why.
 
@@ -51,7 +70,9 @@ If real tests were not run, say so explicitly and explain why.
 - Add or update GoDoc for every exported identifier and field affected.
 - Update `README.md` or a runnable example when the normal caller workflow
   changes.
-- Add one concise, user-facing bullet under `## Unreleased` in `CHANGELOG.md`.
+- Add one concise, user-facing bullet under `## Unreleased` in the affected SDK
+  changelog: root `CHANGELOG.md` for Go, `python/CHANGELOG.md` for Python, or
+  both for a shared change.
 
 ### Cross-language contract
 
@@ -60,6 +81,8 @@ blocked reason, error kind, data format, or other observable behavior requires:
 
 - a specification version bump;
 - matching implementation and tests;
+- a matching update to `docs/contract.json`, including its `spec_version`, and
+  passing contract tests in both SDKs;
 - an update to `docs/API_SUPPORT.md` when runtime support differs; and
 - a clear compatibility note in the pull request and changelog when existing
   callers must change. A dedicated migration document is added only when the
@@ -82,7 +105,8 @@ Do not change a frozen string value only to make its Go name look cleaner.
 - Keep [docs/README.md](docs/README.md) as the documentation index and stability
   boundary.
 - Keep `docs/API_SUPPORT.md` focused on runtime capability differences.
-- Keep Go-specific parameter, field, zero-value, and error semantics in GoDoc.
+- Keep language-specific parameter, field, zero-value, and error semantics in
+  GoDoc or Python docstrings and type annotations.
 - Use [docs/ERRORS.md](docs/ERRORS.md) for caller-facing error guidance.
 
 ## Pull requests
@@ -109,7 +133,7 @@ requests unless a maintainer has agreed to that plan.
 Include enough information to reproduce the problem without including secrets:
 
 - unio version or commit;
-- Go version and operating system;
+- SDK language/version, language runtime version, and operating system;
 - selected `AgentKind`;
 - agent CLI name and exact version;
 - the operation that failed and the Session state;
@@ -125,3 +149,12 @@ its full contents.
 Maintainers publish the Go module by creating a SemVer Git tag on the exact
 commit merged into `master`. A changelog heading alone is not a release. Tags
 are never moved or recreated after publication.
+
+Python versions are independent from Go versions. A `python-vX.Y.Z` tag must
+match `python/pyproject.toml` and `python/CHANGELOG.md`; the Python release
+workflow builds and publishes the `unio-py` distribution through PyPI Trusted
+Publishing. Configure that PyPI project with repository `Fullstop000/unio`,
+workflow `python-release.yml`, and environment `pypi` before creating the first
+tag. TestPyPI may be used for the first dry run with a temporary
+workflow/environment, but its artifact must not be reused for the production
+release.

@@ -10,7 +10,7 @@ import (
 )
 
 // TestConcurrentSessionUseIsSafe hammers one session with concurrent
-// Prompt/Cancel/ProcessState/Close from many goroutines. The driver must
+// Send/Interrupt/ProcessState/Close from many goroutines. The driver must
 // guarantee safety itself (SPEC §Concurrency) — run under `go test -race`.
 func TestConcurrentSessionUseIsSafe(t *testing.T) {
 	d := New(context.Background(), driver.AgentSpec{})
@@ -24,7 +24,7 @@ func TestConcurrentSessionUseIsSafe(t *testing.T) {
 		for range ch {
 		}
 	}()
-	if err := att.Session.Run(nil); err != nil {
+	if err := att.Session.Start(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -34,7 +34,7 @@ func TestConcurrentSessionUseIsSafe(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for j := 0; j < 50; j++ {
-				_, _ = att.Session.Prompt(driver.PromptReq{Text: "x"})
+				_, _ = att.Session.Send(driver.UserMessage{Text: "x"})
 				_ = att.Session.Interrupt()
 				_ = att.Session.ProcessState()
 				_ = att.Session.SessionID()
@@ -47,13 +47,13 @@ func TestConcurrentSessionUseIsSafe(t *testing.T) {
 	}
 }
 
-// TestPostCloseCallsFail verifies Run/Prompt after Close return a closed error
+// TestPostCloseCallsFail verifies Start/Send after Close return a closed error
 // and Close is idempotent.
 func TestPostCloseCallsFail(t *testing.T) {
 	d := New(context.Background(), driver.AgentSpec{})
 	att, _ := d.OpenSession(driver.OpenParams{})
 	_ = att.Events.Subscribe()
-	_ = att.Session.Run(nil)
+	_ = att.Session.Start()
 
 	if err := att.Session.Close(); err != nil {
 		t.Fatal(err)
@@ -62,14 +62,14 @@ func TestPostCloseCallsFail(t *testing.T) {
 	if err := att.Session.Close(); err != nil {
 		t.Fatalf("second Close should be a no-op, got %v", err)
 	}
-	// Prompt after close fails with unsupported/closed.
-	if _, err := att.Session.Prompt(driver.PromptReq{Text: "x"}); err == nil {
-		t.Fatal("Prompt after Close should fail")
+	// Send after close fails with unsupported/closed.
+	if _, err := att.Session.Send(driver.UserMessage{Text: "x"}); err == nil {
+		t.Fatal("Send after Close should fail")
 	} else if kind, ok := errs.KindOf(err); !ok || kind != errs.KindUnsupported {
 		t.Fatalf("expected unsupported after close, got %v", err)
 	}
-	// Run after close fails too.
-	if err := att.Session.Run(nil); err == nil {
-		t.Fatal("Run after Close should fail")
+	// Start after close fails too.
+	if err := att.Session.Start(); err == nil {
+		t.Fatal("Start after Close should fail")
 	}
 }

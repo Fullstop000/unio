@@ -46,24 +46,24 @@ func TestFakeLifecycleNewSession(t *testing.T) {
 	}
 	ch := att.Events.Subscribe()
 
-	if err := att.Session.Run(nil); err != nil {
+	if err := att.Session.Start(); err != nil {
 		t.Fatal(err)
 	}
 	if att.Session.SessionID() == "" {
-		t.Fatal("Run should attach a session id")
+		t.Fatal("Start should attach a session id")
 	}
 	if st := att.Session.ProcessState(); st.Phase != driver.PhaseActive {
-		t.Fatalf("expected Active after Run, got %s", st.Phase)
+		t.Fatalf("expected Active after Start, got %s", st.Phase)
 	}
 
-	runID, err := att.Session.Prompt(driver.PromptReq{Text: "hi"})
+	runID, err := att.Session.Send(driver.UserMessage{Text: "hi"})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Expected stream: Starting, SessionAttached, Active (from Run),
+	// Expected stream: Starting, SessionAttached, Active (from Start),
 	// then PromptInFlight, Output(thinking), Output(text), Output(turn_end),
-	// Completed, Active (from Prompt).
+	// Completed, Active (from Send).
 	evs := collect(t, ch, 9, 2*time.Second)
 
 	var sawAttached, sawCompleted, sawThinking, sawText, sawTurnEnd bool
@@ -111,7 +111,7 @@ func TestFakeResumeReusesSessionID(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = att.Events.Subscribe()
-	if err := att.Session.Run(nil); err != nil {
+	if err := att.Session.Start(); err != nil {
 		t.Fatal(err)
 	}
 	if got := att.Session.SessionID(); got != "prior-abc" {
@@ -125,8 +125,8 @@ func TestFakeFailScript(t *testing.T) {
 
 	att, _ := d.OpenSession(driver.OpenParams{})
 	ch := att.Events.Subscribe()
-	_ = att.Session.Run(nil)
-	_, _ = att.Session.Prompt(driver.PromptReq{Text: "x"})
+	_ = att.Session.Start()
+	_, _ = att.Session.Send(driver.UserMessage{Text: "x"})
 
 	evs := collect(t, ch, 12, time.Second)
 	var failed bool
@@ -144,7 +144,7 @@ func TestFakeInterruptNotInFlight(t *testing.T) {
 	d := New(context.Background(), driver.AgentSpec{})
 	att, _ := d.OpenSession(driver.OpenParams{})
 	_ = att.Events.Subscribe()
-	_ = att.Session.Run(nil)
+	_ = att.Session.Start()
 
 	if err := att.Session.Interrupt(); err != nil {
 		t.Fatal(err)
@@ -158,7 +158,7 @@ func TestFakeInterruptIdleIsNoop(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = att.Events.Subscribe()
-	if err := att.Session.Run(nil); err != nil {
+	if err := att.Session.Start(); err != nil {
 		t.Fatal(err)
 	}
 	if err := att.Session.Interrupt(); err != nil {
@@ -180,8 +180,8 @@ func TestFakeBlockedTurnContinues(t *testing.T) {
 	)
 	att, _ := d.OpenSession(driver.OpenParams{})
 	events := att.Events.Subscribe()
-	_ = att.Session.Run(nil)
-	run, _ := att.Session.Prompt(driver.PromptReq{Text: "go"})
+	_ = att.Session.Start()
+	run, _ := att.Session.Send(driver.UserMessage{Text: "go"})
 	ev := waitRunEvent(t, events, run, driver.EventBlocked)
 	if ev.Blocked == nil || ev.Blocked.Kind != driver.BlockedToolApproval {
 		t.Fatalf("unexpected block: %+v", ev)
@@ -190,7 +190,7 @@ func TestFakeBlockedTurnContinues(t *testing.T) {
 		t.Fatalf("phase after blocked event = %q; want %q", state, driver.PhaseBlocked)
 	}
 
-	continued, err := att.Session.Continue("allow_once")
+	continued, err := att.Session.Respond(driver.OptionSelection{Value: "allow_once"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,8 +203,8 @@ func TestFakeInterruptHeldTurn(t *testing.T) {
 	d.ScriptNextSession(Script{Wait: gate})
 	att, _ := d.OpenSession(driver.OpenParams{})
 	events := att.Events.Subscribe()
-	_ = att.Session.Run(nil)
-	run, _ := att.Session.Prompt(driver.PromptReq{Text: "long"})
+	_ = att.Session.Start()
+	run, _ := att.Session.Send(driver.UserMessage{Text: "long"})
 	if err := att.Session.Interrupt(); err != nil {
 		t.Fatal(err)
 	}

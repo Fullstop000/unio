@@ -292,7 +292,7 @@ func (p *process) acquire(session *session) bool {
 	return true
 }
 
-func (p *process) release(session *session) {
+func (p *process) release(session *session) bool {
 	p.mu.Lock()
 	delete(p.attachments, session)
 	empty := len(p.attachments) == 0
@@ -300,6 +300,7 @@ func (p *process) release(session *session) {
 	if empty {
 		p.shutdown()
 	}
+	return empty
 }
 
 func (p *process) registerSession(id string, session *session) {

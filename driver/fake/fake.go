@@ -15,7 +15,7 @@ import (
 	"github.com/Fullstop000/unio/driver"
 )
 
-// Script describes the events a single Prompt should emit, in order, before the
+// Script describes the events a single Send or Respond should emit, in order, before the
 // terminal Completed/Failed. If FailWith is non-nil the run ends with a Failed
 // event carrying it; otherwise it ends Completed with Result.
 type Script struct {
@@ -29,7 +29,7 @@ type Script struct {
 }
 
 // Driver is an in-memory Driver. It mints monotonic session ids and
-// hands each opened session an optional queue of Scripts consumed one-per-Prompt.
+// hands each opened session an optional queue of Scripts consumed per submission.
 type Driver struct {
 	ctx            context.Context
 	spec           driver.AgentSpec
@@ -182,9 +182,9 @@ func (s *session) setState(st driver.ProcessState) {
 	s.bus.Emit(driver.LifecycleEvent(st))
 }
 
-// Run brings the session online: resume reuses the pre-assigned id, otherwise a
-// fresh one is minted. An init prompt, if given, is delivered as the first turn.
-func (s *session) Run(initPrompt *driver.PromptReq) error {
+// Start brings the session online: resume reuses the pre-assigned id, otherwise
+// a fresh one is minted.
+func (s *session) Start() error {
 	if err := s.ctx.Err(); err != nil {
 		return err
 	}
@@ -205,16 +205,11 @@ func (s *session) Run(initPrompt *driver.PromptReq) error {
 	s.bus.Emit(driver.SessionAttachedEvent(sid))
 	s.setState(driver.ProcessState{Phase: driver.PhaseActive, SessionID: sid})
 
-	if initPrompt != nil {
-		if _, err := s.Prompt(*initPrompt); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
-// Prompt replays the next scripted response (or a trivial echo when unscripted).
-func (s *session) Prompt(req driver.PromptReq) (driver.RunID, error) {
+// Send replays the next scripted response (or a trivial echo when unscripted).
+func (s *session) Send(input driver.UserInput) (driver.RunID, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
@@ -225,15 +220,19 @@ func (s *session) Prompt(req driver.PromptReq) (driver.RunID, error) {
 	}
 	sid := s.sessionID
 	if sid == "" {
-		return "", driver.NewProtocolError("fake: Prompt before Run")
+		return "", driver.NewProtocolError("fake: Send before Start")
 	}
 	if s.active != nil || s.blocked != nil {
 		return "", driver.NewInvalidStateError("fake: session is not idle")
 	}
+	message, ok := input.(driver.UserMessage)
+	if !ok {
+		return "", driver.NewInvalidStateError("fake: a new turn requires UserMessage")
+	}
 	script, scripted := s.nextScriptLocked()
 	if !scripted {
 		script = Script{
-			Items:  []driver.AgentEventItem{{Kind: driver.ItemText, Text: "echo: " + req.Text}},
+			Items:  []driver.AgentEventItem{{Kind: driver.ItemText, Text: "echo: " + message.Text}},
 			Result: driver.RunResult{FinishReason: driver.FinishNatural},
 		}
 	}
@@ -297,7 +296,7 @@ func (s *session) execute(t *turn) {
 	s.setState(driver.ProcessState{Phase: driver.PhaseActive, SessionID: s.sessionID})
 }
 
-func (s *session) Continue(input string) (driver.RunID, error) {
+func (s *session) Respond(input driver.UserInput) (driver.RunID, error) {
 	if err := s.ctx.Err(); err != nil {
 		return "", err
 	}
@@ -309,10 +308,15 @@ func (s *session) Continue(input string) (driver.RunID, error) {
 	if s.blocked == nil {
 		return "", driver.NewInvalidStateError("fake: no blocked turn")
 	}
+	responseText := ""
 	if len(s.blocked.Options) > 0 {
+		selection, ok := input.(driver.OptionSelection)
+		if !ok {
+			return "", driver.NewInvalidStateError("fake: blocked options require OptionSelection")
+		}
 		valid := false
 		for _, option := range s.blocked.Options {
-			if option.Value == input {
+			if option.Value == selection.Value {
 				valid = true
 				break
 			}
@@ -320,11 +324,18 @@ func (s *session) Continue(input string) (driver.RunID, error) {
 		if !valid {
 			return "", driver.NewInvalidStateError("fake: invalid blocked response")
 		}
+		responseText = selection.Value
+	} else {
+		message, ok := input.(driver.UserMessage)
+		if !ok {
+			return "", driver.NewInvalidStateError("fake: blocked user input requires UserMessage")
+		}
+		responseText = message.Text
 	}
 	s.blocked = nil
 	script, scripted := s.nextScriptLocked()
 	if !scripted {
-		script = Script{Items: []driver.AgentEventItem{{Kind: driver.ItemText, Text: "echo: " + input}}}
+		script = Script{Items: []driver.AgentEventItem{{Kind: driver.ItemText, Text: "echo: " + responseText}}}
 	}
 	return s.startScriptLocked(script), nil
 }

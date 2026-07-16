@@ -37,7 +37,7 @@ func main() {
 		log.Fatal(err)
 	}
 	fmt.Printf("selected session: id=%s state=%s\n", session.ID(), session.State())
-	result, err := session.Run("Reply with exactly one word: resumed")
+	result, err := session.Run(unio.Message("Reply with exactly one word: resumed"))
 	if err != nil {
 		log.Fatal(err)
 	}

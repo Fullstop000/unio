@@ -48,7 +48,7 @@ func (d *Driver) ListSessions(params driver.ListSessionsParams) ([]driver.Stored
 }
 
 // OpenSession resolves the executable (surfacing not_installed early) and builds
-// an idle session handle. It does not spawn until Run.
+// an idle session handle. It does not spawn until Start.
 func (d *Driver) OpenSession(params driver.OpenParams) (*driver.SessionAttachment, error) {
 	spec := d.spec
 	if params.Cwd != "" {
@@ -89,11 +89,11 @@ type handle struct {
 	bus      *driver.EventBus
 	acc      *toolCallAccumulator
 
-	// lmu serialises the mutating lifecycle methods (Run/Prompt/Cancel/Close) so
+	// lmu serialises the mutating lifecycle methods (Start/Send/Interrupt/Close) so
 	// the driver — not the caller — guarantees the Session is safe for concurrent
 	// use (SPEC §Concurrency). Distinct from mu, which is the fine-grained guard
 	// for tr/done shared with the reader loop. Held only across brief windows
-	// (Prompt returns after the stdin write, not for the whole turn).
+	// (Send returns after the stdin write, not for the whole turn).
 	lmu     sync.Mutex
 	lclosed bool
 
@@ -160,9 +160,8 @@ func (h *handle) buildArgs() []string {
 	return args
 }
 
-// Run spawns the child and starts the reader loop. If initPrompt is provided it
-// is sent as the first user message (Claude requires stdin to emit system.init).
-func (h *handle) Run(initPrompt *driver.PromptReq) error {
+// Start spawns the child and starts the reader loop.
+func (h *handle) Start() error {
 	ctx := h.ctx
 	h.lmu.Lock()
 	if h.lclosed {
@@ -203,17 +202,12 @@ func (h *handle) Run(initPrompt *driver.PromptReq) error {
 	}
 	h.lmu.Unlock()
 
-	if initPrompt != nil {
-		if _, err := h.Prompt(*initPrompt); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
-// Prompt writes a user-message line to stdin and marks the turn in flight. The
+// Send writes a user-message line to stdin and marks the turn in flight. The
 // resulting Output/Completed events arrive via the reader loop.
-func (h *handle) Prompt(req driver.PromptReq) (driver.RunID, error) {
+func (h *handle) Send(input driver.UserInput) (driver.RunID, error) {
 	h.lmu.Lock()
 	defer h.lmu.Unlock()
 	if h.lclosed {
@@ -224,7 +218,11 @@ func (h *handle) Prompt(req driver.PromptReq) (driver.RunID, error) {
 	done := h.done
 	h.mu.Unlock()
 	if tr == nil {
-		return "", driver.NewTransportError("claude: prompt before Run")
+		return "", driver.NewTransportError("claude: send before Start")
+	}
+	message, ok := input.(driver.UserMessage)
+	if !ok {
+		return "", driver.NewInvalidStateError("claude: a new turn requires UserMessage")
 	}
 
 	runID := driver.NewRunID()
@@ -232,7 +230,7 @@ func (h *handle) Prompt(req driver.PromptReq) (driver.RunID, error) {
 	h.streamedThisTurn.Store(false)
 	h.setState(driver.ProcessState{Phase: driver.PhasePromptInFlight, SessionID: h.SessionID(), RunID: runID})
 
-	line := BuildUserMessage(req.Text) + "\n"
+	line := BuildUserMessage(message.Text) + "\n"
 	payload := []byte(line)
 	n, err := tr.stdin().Write(payload)
 	if err != nil || n != len(payload) {
@@ -298,14 +296,14 @@ func (h *handle) Interrupt() error {
 	return nil
 }
 
-// Continue returns unsupported because this transport cannot currently emit a
+// Respond returns unsupported because this transport cannot currently emit a
 // blocked permission/user-input event.
-func (h *handle) Continue(input string) (driver.RunID, error) {
+func (h *handle) Respond(input driver.UserInput) (driver.RunID, error) {
 	return "", driver.NewUnsupportedError("claude: no blocked turn")
 }
 
 // Close terminates the child and closes the event bus. Idempotent; after Close,
-// Run/Prompt return an error.
+// Start/Send return an error.
 func (h *handle) Close() error {
 	ctx := context.WithoutCancel(h.ctx)
 	h.lmu.Lock()

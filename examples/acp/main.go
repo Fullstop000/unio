@@ -27,7 +27,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	result, err := session.Run("Reply with exactly one word: hello")
+	result, err := session.Run(unio.Message("Reply with exactly one word: hello"))
 	if err != nil {
 		log.Fatal(err)
 	}

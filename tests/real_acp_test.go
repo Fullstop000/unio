@@ -37,13 +37,31 @@ func TestReal_ACP_TraeXCore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := session.Run("Reply with exactly one word: ok")
+	const marker = "GO_TRAEX_E2E_OK"
+	stream, err := session.Stream(unio.Message("Reply with exactly: " + marker))
 	if err != nil {
-		t.Fatalf("run: %v", err)
+		t.Fatalf("stream: %v", err)
 	}
-	if strings.TrimSpace(result.Text) == "" || result.SessionID == "" {
+	var streamedText strings.Builder
+	var eventKinds []unio.EventKind
+	for stream.Next() {
+		event := stream.Event()
+		eventKinds = append(eventKinds, event.Kind)
+		if event.Kind == unio.KindText {
+			streamedText.WriteString(event.Text)
+		}
+	}
+	result, err := stream.Result()
+	if err != nil {
+		t.Fatalf("stream result: %v", err)
+	}
+	if streamedText.String() != result.Text {
+		t.Fatalf("streamed text %q != result text %q", streamedText.String(), result.Text)
+	}
+	if strings.TrimSpace(result.Text) != marker || result.SessionID == "" || len(eventKinds) == 0 {
 		t.Fatalf("result = %+v", result)
 	}
+	t.Logf("traex stream events=%v text=%q", eventKinds, result.Text)
 	stats, err := session.TokenStatistics()
 	if err != nil {
 		t.Fatalf("session token statistics: %v", err)
@@ -130,7 +148,7 @@ func TestReal_ACP_KimiProtocol(t *testing.T) {
 			t.Fatal(err)
 		}
 		_ = resumed.Events.Subscribe()
-		if err := resumed.Session.Run(nil); err != nil {
+		if err := resumed.Session.Start(); err != nil {
 			t.Fatalf("session/resume: %v", err)
 		}
 		if resumed.Session.SessionID() != listed[0].SessionID {
@@ -144,7 +162,7 @@ func TestReal_ACP_KimiProtocol(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = att.Events.Subscribe()
-	if err := att.Session.Run(nil); err != nil {
+	if err := att.Session.Start(); err != nil {
 		t.Fatalf("session/new: %v", err)
 	}
 	if att.Session.SessionID() == "" {
@@ -179,7 +197,7 @@ func TestReal_ACP_OpenCodeProtocol(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = att.Events.Subscribe()
-	if err := att.Session.Run(nil); err != nil {
+	if err := att.Session.Start(); err != nil {
 		t.Fatalf("session/new: %v", err)
 	}
 	if att.Session.SessionID() == "" {
@@ -200,7 +218,7 @@ func TestReal_ACP_OpenCodeProtocol(t *testing.T) {
 			t.Fatal(err)
 		}
 		_ = resumed.Events.Subscribe()
-		if err := resumed.Session.Run(nil); err != nil {
+		if err := resumed.Session.Start(); err != nil {
 			t.Fatalf("session/resume: %v", err)
 		}
 		if resumed.Session.SessionID() != listed[0].SessionID {
@@ -229,14 +247,31 @@ func TestReal_ACP_OpenCodeDeepSeekV4Flash(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := session.Run("Reply with exactly one word: ok")
+	const marker = "GO_OPENCODE_E2E_OK"
+	stream, err := session.Stream(unio.Message("Reply with exactly: " + marker))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.TrimSpace(result.Text) == "" || result.SessionID == "" {
+	var streamedText strings.Builder
+	var eventKinds []unio.EventKind
+	for stream.Next() {
+		event := stream.Event()
+		eventKinds = append(eventKinds, event.Kind)
+		if event.Kind == unio.KindText {
+			streamedText.WriteString(event.Text)
+		}
+	}
+	result, err := stream.Result()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if streamedText.String() != result.Text {
+		t.Fatalf("streamed text %q != result text %q", streamedText.String(), result.Text)
+	}
+	if strings.TrimSpace(result.Text) != marker || result.SessionID == "" || len(eventKinds) == 0 {
 		t.Fatalf("result = %+v", result)
 	}
-	t.Logf("opencode %s said %q", openCodeDeepSeekV4Flash, strings.TrimSpace(result.Text))
+	t.Logf("opencode %s events=%v text=%q", openCodeDeepSeekV4Flash, eventKinds, result.Text)
 }
 
 func TestReal_ACP_TraeXResume(t *testing.T) {
@@ -251,7 +286,7 @@ func TestReal_ACP_TraeXResume(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, err := session.Run("Reply with exactly one word: first")
+	first, err := session.Run(unio.Message("Reply with exactly one word: first"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -272,7 +307,7 @@ func TestReal_ACP_TraeXResume(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetSession(%q): %v", id, err)
 	}
-	result, err := resumed.Run("Reply with exactly one word: resumed")
+	result, err := resumed.Run(unio.Message("Reply with exactly one word: resumed"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -293,7 +328,7 @@ func TestReal_ACP_TraeXInterrupt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	stream, err := session.Stream("Write every integer from 1 to 10000, one per line.")
+	stream, err := session.Stream(unio.Message("Write every integer from 1 to 10000, one per line."))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -308,7 +343,7 @@ func TestReal_ACP_TraeXInterrupt(t *testing.T) {
 	if !result.Interrupted {
 		t.Fatalf("interrupt result = %+v", result)
 	}
-	followup, err := session.Run("Reply with exactly one word: alive")
+	followup, err := session.Run(unio.Message("Reply with exactly one word: alive"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -20,7 +20,7 @@ type Session struct {
 	cwd     string // immutable after the handle is published
 	inner   driver.Session
 	events  <-chan driver.AgentEvent
-	started bool // true once inner.Run has successfully initialized this attachment
+	started bool // true once inner.Start has successfully initialized this attachment
 	active  *Stream
 }
 
@@ -102,17 +102,20 @@ func (s *Session) TokenStatistics() (TokenStatistics, error) {
 	}, nil
 }
 
-// Run sends one prompt and waits for completion, interruption, or blocking.
-func (s *Session) Run(prompt string) (Result, error) {
-	stream, err := s.Stream(prompt)
+// Run submits caller input and waits for completion, interruption, or blocking.
+// An idle Session starts a new turn; a blocked Session answers its pending
+// interaction.
+func (s *Session) Run(input UserInput) (Result, error) {
+	stream, err := s.Stream(input)
 	if err != nil {
 		return Result{}, err
 	}
 	return stream.Result()
 }
 
-// Stream sends one prompt and returns its live event stream.
-func (s *Session) Stream(prompt string) (*Stream, error) {
+// Stream submits caller input and returns its live event stream. Session state
+// selects whether this starts a new turn or answers a blocked interaction.
+func (s *Session) Stream(input UserInput) (*Stream, error) {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
 	s.mu.Lock()
@@ -120,26 +123,56 @@ func (s *Session) Stream(prompt string) (*Stream, error) {
 		s.mu.Unlock()
 		return nil, errs.InvalidState("agent is closed")
 	}
-	if s.state != Idle {
-		state := s.state
+	state := s.state
+	if state == Running {
 		s.mu.Unlock()
-		return nil, errs.InvalidState("cannot run session while " + string(state))
+		return nil, errs.InvalidState("cannot submit input while " + string(state))
+	}
+	if state != Idle && state != Blocked {
+		s.mu.Unlock()
+		return nil, errs.InvalidState("cannot submit input while " + string(state))
+	}
+	if state == Idle {
+		if _, ok := input.(UserMessage); !ok {
+			s.mu.Unlock()
+			return nil, errs.InvalidState("an idle session requires UserMessage")
+		}
+	}
+	if state == Blocked && (s.inner == nil || s.inner.ProcessState().Phase == driver.PhaseClosed) {
+		inner := s.detachLocked()
+		s.transitionLocked(Idle)
+		s.mu.Unlock()
+		if inner != nil {
+			_ = inner.Close()
+		}
+		return nil, driver.NewTransportError("agent transport closed while blocked")
 	}
 	s.transitionLocked(Running)
 	s.mu.Unlock()
 
-	if err := s.ensureAttached(); err != nil {
-		s.setState(Idle)
-		return nil, err
+	if state == Idle {
+		if err := s.ensureAttached(); err != nil {
+			s.setState(Idle)
+			return nil, err
+		}
 	}
 	s.mu.Lock()
 	inner := s.inner
 	events := s.events
 	s.mu.Unlock()
-	runID, err := inner.Prompt(driver.PromptReq{Text: prompt})
+	var runID driver.RunID
+	var err error
+	if state == Blocked {
+		runID, err = inner.Respond(input)
+	} else {
+		runID, err = inner.Send(input)
+	}
 	if err != nil {
-		s.discardIfClosed(inner)
-		s.setState(Idle)
+		if s.discardIfClosed(inner) || state == Idle {
+			s.setState(Idle)
+		} else {
+			s.setState(Blocked)
+		}
 		return nil, err
 	}
 	stream := newStream(s.agent.ctx, s, events, runID)
@@ -160,7 +193,7 @@ func (s *Session) ensureAttached() error {
 	if started {
 		return nil
 	}
-	if err := inner.Run(nil); err != nil {
+	if err := inner.Start(); err != nil {
 		s.detachIfCurrent(inner)
 		_ = inner.Close()
 		return err
@@ -242,57 +275,6 @@ func (s *Session) Interrupt() error {
 		s.setState(Idle)
 	}
 	return nil
-}
-
-// Continue supplies input requested by a blocked turn and waits for the agent
-// to complete, block again, or be interrupted.
-func (s *Session) Continue(input string) (Result, error) {
-	stream, err := s.continueStream(input)
-	if err != nil {
-		return Result{}, err
-	}
-	return stream.Result()
-}
-
-func (s *Session) continueStream(input string) (*Stream, error) {
-	s.opMu.Lock()
-	defer s.opMu.Unlock()
-	s.mu.Lock()
-	if s.agent.closed.Load() {
-		s.mu.Unlock()
-		return nil, errs.InvalidState("agent is closed")
-	}
-	if s.state != Blocked {
-		s.mu.Unlock()
-		return nil, errs.InvalidState("continue requires a blocked session")
-	}
-	inner := s.inner
-	if inner == nil || inner.ProcessState().Phase == driver.PhaseClosed {
-		s.detachLocked()
-		s.transitionLocked(Idle)
-		s.mu.Unlock()
-		if inner != nil {
-			_ = inner.Close()
-		}
-		return nil, driver.NewTransportError("agent transport closed while blocked")
-	}
-	s.transitionLocked(Running)
-	events := s.events
-	s.mu.Unlock()
-	runID, err := inner.Continue(input)
-	if err != nil {
-		if s.discardIfClosed(inner) {
-			s.setState(Idle)
-		} else {
-			s.setState(Blocked)
-		}
-		return nil, err
-	}
-	stream := newStream(s.agent.ctx, s, events, runID)
-	s.mu.Lock()
-	s.active = stream
-	s.mu.Unlock()
-	return stream, nil
 }
 
 // transitionLocked applies a state change and its side effects. The caller

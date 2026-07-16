@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Added a machine-readable cross-language contract checked by Go and Python.
+- Replaced public blocked `Continue` with state-aware `Run`/`Stream` accepting
+  `UserMessage` or `OptionSelection`; callers must wrap all submitted input.
+- Made `Agent.Close` wait until the final shared ACP process is reaped.
+
 ## v0.2.0 - 2026-07-15
 
 - Added documentation for onboarding, runtime compatibility, errors, security,

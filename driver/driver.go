@@ -22,7 +22,7 @@ import (
 type Phase string
 
 const (
-	// PhaseIdle: handle constructed but Run has not been called.
+	// PhaseIdle: handle constructed but Start has not been called.
 	PhaseIdle Phase = "idle"
 	// PhaseStarting: the runtime process is spinning up.
 	PhaseStarting Phase = "starting"
@@ -187,23 +187,25 @@ type ListSessionsParams struct {
 	Cwd string
 }
 
-// Attachment is a piece of non-text content attached to a prompt.
-type Attachment struct {
-	// Kind is "image" or "file".
-	Kind string
-	// MIME type of the payload.
-	MIME string
-	// Path is the on-disk path for file attachments (empty for inline images).
-	Path string
-	// Bytes is the raw payload.
-	Bytes []byte
+// UserInput is one caller submission. UserMessage starts or answers with text;
+// OptionSelection answers a runtime-advertised blocked option.
+type UserInput interface {
+	isUserInput()
 }
 
-// PromptReq is a single prompt submitted to a live Session.
-type PromptReq struct {
-	Text        string
-	Attachments []Attachment
+// UserMessage is natural-language input from the caller.
+type UserMessage struct {
+	Text string
 }
+
+func (UserMessage) isUserInput() {}
+
+// OptionSelection selects one BlockOption.Value advertised by a blocked turn.
+type OptionSelection struct {
+	Value string
+}
+
+func (OptionSelection) isUserInput() {}
 
 // OpenParams selects a new or resumed runtime Session. A non-empty
 // ResumeSessionID requests resume; an empty value starts a fresh Session.
@@ -259,7 +261,7 @@ type Driver interface {
 	ListSessions(params ListSessionsParams) ([]StoredSessionMeta, error)
 
 	// OpenSession opens a new or persisted session. The returned Session is in
-	// PhaseIdle; the caller must invoke Session.Run to bring it online.
+	// PhaseIdle; the caller must invoke Session.Start to bring it online.
 	// OpenParams.ResumeSessionID selects new-vs-resume.
 	OpenSession(params OpenParams) (*SessionAttachment, error)
 }
@@ -276,13 +278,13 @@ type RawSessionData struct {
 }
 
 // Session is a per-session lifecycle handle representing one conversation with a
-// runtime. Consumers drive it through Run -> Prompt -> Cancel/Close and observe
+// runtime. Consumers drive it through Start -> Send/Respond -> Interrupt/Close and observe
 // side effects on the paired EventBus.
 //
 // Implementations serialise mutating calls internally; callers do not need an
 // external lock just to keep one session safe.
 type Session interface {
-	// SessionID returns the runtime-assigned session id, or "" before Run has
+	// SessionID returns the runtime-assigned session id, or "" before Start has
 	// attached one. This is the value used for later resume.
 	SessionID() SessionID
 
@@ -295,19 +297,16 @@ type Session interface {
 	// TokenStatistics returns cumulative usage parsed from Raw.
 	TokenStatistics() (TokenUsage, error)
 
-	// Run brings the session online (spawning or attaching the runtime as
-	// needed). If initPrompt is non-nil it is delivered as the first turn so
-	// runtimes can bootstrap in one round-trip. Resume intent was threaded in
-	// via OpenSession's OpenParams.
-	Run(initPrompt *PromptReq) error
+	// Start brings the session online, spawning or attaching the runtime as
+	// needed. Resume intent was threaded in via OpenSession's OpenParams.
+	Start() error
 
-	// Prompt sends a prompt to the live session and returns the RunID assigned
-	// so callers can correlate the subsequent Output/Completed events.
-	Prompt(req PromptReq) (RunID, error)
+	// Send starts a new runtime turn and returns its SDK correlation ID.
+	Send(input UserInput) (RunID, error)
 
-	// Continue supplies external input to a blocked run and returns the new SDK
-	// run id used to correlate events after the pause.
-	Continue(input string) (RunID, error)
+	// Respond answers the pending interaction of a blocked runtime turn and
+	// returns the new SDK correlation ID used for subsequent events.
+	Respond(input UserInput) (RunID, error)
 
 	// Interrupt stops the active or blocked turn. It is an idempotent no-op when
 	// no turn is active.

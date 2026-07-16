@@ -100,7 +100,7 @@ func TestOpenCodeSetsModelViaSessionConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := att.Session.Run(nil); err != nil {
+	if err := att.Session.Start(); err != nil {
 		t.Fatal(err)
 	}
 	if selected != spec.Model {
@@ -148,8 +148,8 @@ func TestInitializationRejectsUnsupportedProtocolVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := att.Session.Run(nil); !errors.Is(err, driver.NewUnsupportedError("")) {
-		t.Fatalf("Run error = %v", err)
+	if err := att.Session.Start(); !errors.Is(err, driver.NewUnsupportedError("")) {
+		t.Fatalf("Start error = %v", err)
 	}
 }
 
@@ -163,20 +163,20 @@ func TestResumeRequiresRuntimeCapability(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := att.Session.Run(nil); !errors.Is(err, driver.NewUnsupportedError("")) {
-		t.Fatalf("Run error = %v", err)
+	if err := att.Session.Start(); !errors.Is(err, driver.NewUnsupportedError("")) {
+		t.Fatalf("Start error = %v", err)
 	}
 	if err := att.Session.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err := att.Session.Run(nil); !errors.Is(err, driver.NewInvalidStateError("")) {
-		t.Fatalf("Run after Close error = %v", err)
+	if err := att.Session.Start(); !errors.Is(err, driver.NewInvalidStateError("")) {
+		t.Fatalf("Start after Close error = %v", err)
 	}
-	if _, err := att.Session.Prompt(driver.PromptReq{Text: "closed"}); !errors.Is(err, driver.NewInvalidStateError("")) {
-		t.Fatalf("Prompt after Close error = %v", err)
+	if _, err := att.Session.Send(driver.UserMessage{Text: "closed"}); !errors.Is(err, driver.NewInvalidStateError("")) {
+		t.Fatalf("Send after Close error = %v", err)
 	}
-	if _, err := att.Session.Continue("anything"); !errors.Is(err, driver.NewInvalidStateError("")) {
-		t.Fatalf("Continue after Close error = %v", err)
+	if _, err := att.Session.Respond(driver.OptionSelection{Value: "anything"}); !errors.Is(err, driver.NewInvalidStateError("")) {
+		t.Fatalf("Respond after Close error = %v", err)
 	}
 }
 
@@ -283,10 +283,10 @@ func TestPermissionBecomesBlockedAndContinueResumesTurn(t *testing.T) {
 		t.Fatal(err)
 	}
 	events := att.Events.Subscribe()
-	if err := att.Session.Run(nil); err != nil {
+	if err := att.Session.Start(); err != nil {
 		t.Fatal(err)
 	}
-	run1, err := att.Session.Prompt(driver.PromptReq{Text: "change it"})
+	run1, err := att.Session.Send(driver.UserMessage{Text: "change it"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -294,7 +294,7 @@ func TestPermissionBecomesBlockedAndContinueResumesTurn(t *testing.T) {
 	if blocked.RunID != run1 || blocked.Blocked == nil || len(blocked.Blocked.Options) != 2 || blocked.Blocked.Options[0].Value != "once" {
 		t.Fatalf("blocked = %+v", blocked)
 	}
-	run2, err := att.Session.Continue("once")
+	run2, err := att.Session.Respond(driver.OptionSelection{Value: "once"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -303,7 +303,7 @@ func TestPermissionBecomesBlockedAndContinueResumesTurn(t *testing.T) {
 		t.Fatalf("completed = %+v", completed)
 	}
 	if state := att.Session.ProcessState(); state.Phase != driver.PhaseActive {
-		t.Fatalf("state after Continue = %+v", state)
+		t.Fatalf("state after Respond = %+v", state)
 	}
 	if err := d.Close(); err != nil {
 		t.Fatal(err)
@@ -330,10 +330,10 @@ func TestInterruptWaitsForCancelledPromptResponse(t *testing.T) {
 		t.Fatal(err)
 	}
 	events := att.Events.Subscribe()
-	if err := att.Session.Run(nil); err != nil {
+	if err := att.Session.Start(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := att.Session.Prompt(driver.PromptReq{Text: "wait"}); err != nil {
+	if _, err := att.Session.Send(driver.UserMessage{Text: "wait"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := att.Session.Interrupt(); err != nil {
@@ -374,7 +374,7 @@ func TestResumeUsesCapabilityAndKeepsRequestedID(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = att.Events.Subscribe()
-	if err := att.Session.Run(nil); err != nil {
+	if err := att.Session.Start(); err != nil {
 		t.Fatal(err)
 	}
 	if att.Session.SessionID() != "existing" {
@@ -402,7 +402,7 @@ func TestResumeFallsBackToSessionLoad(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = att.Events.Subscribe()
-	if err := att.Session.Run(nil); err != nil {
+	if err := att.Session.Start(); err != nil {
 		t.Fatal(err)
 	}
 	if att.Session.SessionID() != "existing" {
@@ -441,10 +441,10 @@ func TestToolCallUpdateIsCoalescedBeforeEmission(t *testing.T) {
 		t.Fatal(err)
 	}
 	events := att.Events.Subscribe()
-	if err := att.Session.Run(nil); err != nil {
+	if err := att.Session.Start(); err != nil {
 		t.Fatal(err)
 	}
-	runID, err := att.Session.Prompt(driver.PromptReq{Text: "read"})
+	runID, err := att.Session.Send(driver.UserMessage{Text: "read"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -492,10 +492,10 @@ func TestCloseAfterLifecycleCancellationStillReleasesSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = att.Events.Subscribe()
-	if err := att.Session.Run(nil); err != nil {
+	if err := att.Session.Start(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := att.Session.Prompt(driver.PromptReq{Text: "wait"}); err != nil {
+	if _, err := att.Session.Send(driver.UserMessage{Text: "wait"}); err != nil {
 		t.Fatal(err)
 	}
 	cancel()
@@ -504,6 +504,14 @@ func TestCloseAfterLifecycleCancellationStillReleasesSession(t *testing.T) {
 	}
 	if state := att.Session.ProcessState(); state.Phase != driver.PhaseClosed {
 		t.Fatalf("state after Close = %+v", state)
+	}
+	d.mu.Lock()
+	proc := d.process
+	d.mu.Unlock()
+	select {
+	case <-proc.closed:
+	default:
+		t.Fatal("Close returned before the ACP process was reaped")
 	}
 }
 

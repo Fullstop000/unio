@@ -245,13 +245,13 @@ func TestCodexDriverFullTurn(t *testing.T) {
 	}
 	ch := att.Events.Subscribe()
 
-	if err := att.Session.Run(nil); err != nil {
+	if err := att.Session.Start(); err != nil {
 		t.Fatal(err)
 	}
 	if att.Session.SessionID() != "thr-test-1" {
 		t.Fatalf("expected thread id attached, got %q", att.Session.SessionID())
 	}
-	runID, err := att.Session.Prompt(driver.PromptReq{Text: "say pong"})
+	runID, err := att.Session.Send(driver.UserMessage{Text: "say pong"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -303,10 +303,10 @@ func TestCodexRoutesSoleInFlightTurnWithoutThreadID(t *testing.T) {
 		t.Fatal(err)
 	}
 	ch := att.Events.Subscribe()
-	if err := att.Session.Run(nil); err != nil {
+	if err := att.Session.Start(); err != nil {
 		t.Fatal(err)
 	}
-	runID, err := att.Session.Prompt(driver.PromptReq{Text: "say pong"})
+	runID, err := att.Session.Send(driver.UserMessage{Text: "say pong"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -336,14 +336,14 @@ func TestCodexDriverInterrupt(t *testing.T) {
 	})
 	att, _ := d.OpenSession(driver.OpenParams{})
 	ch := att.Events.Subscribe()
-	_ = att.Session.Run(nil)
+	_ = att.Session.Start()
 
 	if err := att.Session.Interrupt(); err != nil {
 		t.Fatalf("idle interrupt: %v", err)
 	}
 
 	// Start a turn, then interrupt it. Codex supports graceful mid-turn cancel.
-	runID, _ := att.Session.Prompt(driver.PromptReq{Text: "long task"})
+	runID, _ := att.Session.Send(driver.UserMessage{Text: "long task"})
 	// Cancel may race the fast scripted completion; both outcomes are valid so
 	// we assert the run terminates (interrupted → FinishCancelled, or completed).
 	_ = att.Session.Interrupt()
@@ -377,7 +377,7 @@ func TestCodexConcurrentUseIsSafe(t *testing.T) {
 		for range ch {
 		}
 	}()
-	if err := att.Session.Run(nil); err != nil {
+	if err := att.Session.Start(); err != nil {
 		t.Fatal(err)
 	}
 	var wg sync.WaitGroup
@@ -386,7 +386,7 @@ func TestCodexConcurrentUseIsSafe(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for j := 0; j < 15; j++ {
-				_, _ = att.Session.Prompt(driver.PromptReq{Text: "x"})
+				_, _ = att.Session.Send(driver.UserMessage{Text: "x"})
 				_ = att.Session.Interrupt()
 				_ = att.Session.ProcessState()
 				_ = att.Session.SessionID()
@@ -437,10 +437,10 @@ func TestCodexApprovalBlocksAndContinues(t *testing.T) {
 		t.Fatal(err)
 	}
 	events := att.Events.Subscribe()
-	if err := att.Session.Run(nil); err != nil {
+	if err := att.Session.Start(); err != nil {
 		t.Fatal(err)
 	}
-	run, err := att.Session.Prompt(driver.PromptReq{Text: "run command"})
+	run, err := att.Session.Send(driver.UserMessage{Text: "run command"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -450,7 +450,7 @@ func TestCodexApprovalBlocksAndContinues(t *testing.T) {
 	if blocked[len(blocked)-1].Blocked == nil || blocked[len(blocked)-1].Blocked.Kind != driver.BlockedToolApproval {
 		t.Fatalf("unexpected blocked event: %+v", blocked[len(blocked)-1])
 	}
-	continuedRun, err := att.Session.Continue("allow_once")
+	continuedRun, err := att.Session.Respond(driver.OptionSelection{Value: "allow_once"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -477,7 +477,7 @@ func TestCodexProcessLifetimeDoesNotUseTurnContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := att.Session.Run(nil); err != nil {
+	if err := att.Session.Start(); err != nil {
 		t.Fatal(err)
 	}
 	cancel()
@@ -500,12 +500,12 @@ func TestCodexPromptCancellationWaitsForConfirmedInterrupt(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer att.Session.Close()
-	if err := att.Session.Run(nil); err != nil {
+	if err := att.Session.Start(); err != nil {
 		t.Fatal(err)
 	}
 	done := make(chan error, 1)
 	go func() {
-		_, err := att.Session.Prompt(driver.PromptReq{Text: "long"})
+		_, err := att.Session.Send(driver.UserMessage{Text: "long"})
 		done <- err
 	}()
 	<-srv.turnStartSeen
@@ -518,15 +518,15 @@ func TestCodexPromptCancellationWaitsForConfirmedInterrupt(t *testing.T) {
 	}
 	close(srv.turnStartGate)
 	if returnedEarly {
-		t.Fatal("Prompt returned before the submitted turn could be interrupted")
+		t.Fatal("Send returned before the submitted turn could be interrupted")
 	}
 	if err := <-done; !errors.Is(err, context.Canceled) {
-		t.Fatalf("Prompt error = %v; want context.Canceled", err)
+		t.Fatalf("Send error = %v; want context.Canceled", err)
 	}
 	select {
 	case <-srv.interruptSeen:
 	case <-time.After(time.Second):
-		t.Fatal("cancelled Prompt did not send turn/interrupt")
+		t.Fatal("cancelled Send did not send turn/interrupt")
 	}
 }
 
@@ -539,10 +539,10 @@ func TestCodexRejectsTurnStartWithoutTurnID(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer att.Session.Close()
-	if err := att.Session.Run(nil); err != nil {
+	if err := att.Session.Start(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := att.Session.Prompt(driver.PromptReq{Text: "hello"}); err == nil {
+	if _, err := att.Session.Send(driver.UserMessage{Text: "hello"}); err == nil {
 		t.Fatal("turn/start without a turn ID was accepted")
 	}
 }
@@ -557,10 +557,10 @@ func TestCodexSurfacesRejectedInterrupt(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer att.Session.Close()
-	if err := att.Session.Run(nil); err != nil {
+	if err := att.Session.Start(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := att.Session.Prompt(driver.PromptReq{Text: "long"}); err != nil {
+	if _, err := att.Session.Send(driver.UserMessage{Text: "long"}); err != nil {
 		t.Fatal(err)
 	}
 	err = att.Session.Interrupt()
@@ -588,12 +588,12 @@ func TestCodexForcedCancellationInvalidatesIdleSibling(t *testing.T) {
 	}
 	defer active.Session.Close()
 	defer idle.Session.Close()
-	if err := active.Session.Run(nil); err != nil {
+	if err := active.Session.Start(); err != nil {
 		t.Fatal(err)
 	}
 	done := make(chan error, 1)
 	go func() {
-		_, err := active.Session.Prompt(driver.PromptReq{Text: "long"})
+		_, err := active.Session.Send(driver.UserMessage{Text: "long"})
 		done <- err
 	}()
 	<-srv.turnStartSeen
@@ -601,7 +601,7 @@ func TestCodexForcedCancellationInvalidatesIdleSibling(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 	close(srv.turnStartGate)
 	if err := <-done; !errors.Is(err, context.Canceled) {
-		t.Fatalf("Prompt error = %v; want context.Canceled", err)
+		t.Fatalf("Send error = %v; want context.Canceled", err)
 	}
 	if idle.Session.ProcessState().Phase != driver.PhaseClosed {
 		t.Fatalf("idle sibling phase = %q; want closed", idle.Session.ProcessState().Phase)
@@ -726,7 +726,7 @@ func TestCodexMissingResumeDoesNotStartFresh(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = att.Session.Run(nil)
+	err = att.Session.Start()
 	if kind, ok := driverErrorKind(err); !ok || kind != driver.ErrSessionNotFound {
 		t.Fatalf("resume error = %v", err)
 	}

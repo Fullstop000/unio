@@ -1,12 +1,21 @@
 # unio
 
-Go SDK for using Claude Code, Codex, and ACP-native coding agents through one
-human-aligned API.
+One API for using Claude Code, Codex, and ACP-native coding agents.
 
-unio v0.2 requires Go 1.23 or newer. The supported caller-facing packages are
-the root `unio` package and `errs`; packages under `driver` are pre-1.0 adapter
-APIs. v0.1 compatibility and migration guidance are intentionally not
-maintained.
+- [Go SDK](#go-sdk) — module releases use tags such as `v0.2.0`.
+- [Python SDK](python/README.md) — package releases use tags such as
+  `python-v0.1.0`.
+
+Both implementations follow the shared [behavior specification](docs/SPEC.md),
+while package versions evolve independently.
+
+## Go SDK
+
+The Go examples in this branch describe the unreleased API planned for the next
+pre-1.0 minor release and require Go 1.23 or newer. The latest published Go API
+is v0.2.0; use its [versioned documentation](https://github.com/Fullstop000/unio/tree/v0.2.0)
+when staying on that tag. The supported caller-facing packages are the root
+`unio` package and `errs`; packages under `driver` are pre-1.0 adapter APIs.
 
 See the [documentation index](docs/README.md) for the support matrix, behavior
 specification, error guide, and stability boundaries.
@@ -40,8 +49,11 @@ example](examples/acp/main.go) for Kimi, TraeX, and OpenCode.
 ## Install
 
 ```sh
-go get github.com/Fullstop000/unio@v0.2.0
+go get github.com/Fullstop000/unio@master
 ```
+
+This installs the current unreleased API shown below. Published releases should
+use an exact tag and the documentation from that tag.
 
 ## Run a task
 
@@ -71,7 +83,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	result, err := session.Run("Explain this repository")
+	result, err := session.Run(unio.Message("Explain this repository"))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -84,7 +96,7 @@ comes from the selected runtime:
 
 ```go
 session.ID() // ""
-_, _ = session.Run("Start a plan")
+_, _ = session.Run(unio.Message("Start a plan"))
 session.ID() // runtime-owned ID
 ```
 
@@ -125,7 +137,7 @@ See the runnable [stream and interrupt example](examples/stream/main.go).
 ## Stream events
 
 ```go
-stream, err := session.Stream("Refactor the authentication module")
+stream, err := session.Stream(unio.Message("Refactor the authentication module"))
 if err != nil {
 	return err
 }
@@ -154,15 +166,18 @@ A blocked turn returns `err == nil`, sets `Result.Blocked`, and leaves the
 Session blocked. A runtime can block more than once:
 
 ```go
-result, err := session.Run("Apply the change")
+result, err := session.Run(unio.Message("Apply the change"))
 if err != nil {
 	return err
 }
 for result.Blocked != nil {
-	if len(result.Blocked.Options) == 0 {
-		return fmt.Errorf("agent needs input: %s", result.Blocked.Message)
+	var input unio.UserInput
+	if len(result.Blocked.Options) > 0 {
+		input = unio.SelectOption(result.Blocked.Options[0].Value)
+	} else {
+		input = unio.Message("caller-provided response")
 	}
-	result, err = session.Continue(result.Blocked.Options[0].Value)
+	result, err = session.Run(input)
 	if err != nil {
 		return err
 	}
@@ -187,7 +202,7 @@ session, err := agent.GetSession(sessions[0].ID)
 if err != nil {
 	return err
 }
-result, err := session.Run("Continue the previous work")
+result, err := session.Run(unio.Message("Continue the previous work"))
 ```
 
 `ListSessions` defaults to the Agent working directory. `SessionsIn(dir)`

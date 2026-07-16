@@ -9,6 +9,10 @@ successful turn. The remaining documents each have one source-of-truth role:
   context cancellation, blocked turns, and interruption.
 - [Behavior specification](SPEC.md): normative, language-neutral API behavior
   and frozen contract values.
+- [Machine-readable contract](contract.json): frozen values checked by all
+  language implementations.
+- [Python SDK](../python/README.md): install, API guide, examples, and Python
+  release lifecycle.
 - [Go package reference](https://pkg.go.dev/github.com/Fullstop000/unio):
   exported identifiers, fields, and package examples.
 - [Contribution guide](../CONTRIBUTING.md): development gates, testing, contract
@@ -18,9 +22,12 @@ successful turn. The remaining documents each have one source-of-truth role:
 
 ## Stability boundary
 
-Version v0.2 is the supported public API documented here. The published v0.1.0
-tag remains immutable history, but v0.1 compatibility and migration guidance
-are intentionally not maintained.
+These documents describe the current unreleased Go and Python APIs. The latest
+published Go API is v0.2.0; its
+[versioned documentation](https://github.com/Fullstop000/unio/tree/v0.2.0)
+remains the source of truth for that tag. Python evolves independently under
+`python/`. Older compatibility and migration guidance is intentionally not
+maintained unless the maintainers explicitly add it.
 
 The root `unio` package and `errs` package are the supported caller-facing Go
 surface. Packages under `driver` are importable for adapters and tests but are
