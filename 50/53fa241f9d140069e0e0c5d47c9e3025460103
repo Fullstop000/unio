@@ -1,0 +1,29 @@
+CONTRIBUTING.md
+  s_f365f7cae9f071::t_4981d39d7658a3 82-83
+contract_test.go
+  s_f365f7cae9f071::t_23ea630ae37e97 14
+docs/README.md
+  s_f365f7cae9f071::t_7eb979845c8276 12
+docs/SPEC.md
+  s_f365f7cae9f071::t_d41ff9c0b184f3 29-31
+python/tests/test_contract.py
+  s_f365f7cae9f071::t_a762ad6cc215bb 12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "5053fa241f9d140069e0e0c5d47c9e3025460103",
+  "prompts": {},
+  "sessions": {
+    "s_f365f7cae9f071": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6466-eb5a-7962-b8ae-05ac2a874b03",
+        "model": "unknown"
+      },
+      "human_author": "Fullstop000 <fullstop1005@gmail.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
