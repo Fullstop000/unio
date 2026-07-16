@@ -1,0 +1,121 @@
+CHANGELOG.md
+  s_f365f7cae9f071::t_eccf4606c1dc9b 6-7
+CONTRIBUTING.md
+  s_f365f7cae9f071::t_4e7704a5f4fc29 60,82
+README.md
+  s_f365f7cae9f071::t_aeebb5611002f0 82,95,136,165,170-174,176,201
+contract_test.go
+  s_f365f7cae9f071::t_f5cc4df74f08c6 14,34
+docs/API_SUPPORT.md
+  s_f365f7cae9f071::t_a59321d2af753d 82
+docs/ERRORS.md
+  s_f365f7cae9f071::t_190176e752fc31 11,24,52,68,76,95-96,99,107
+docs/README.md
+  s_f365f7cae9f071::t_0d958091ff664b 12
+docs/SPEC.md
+  s_f365f7cae9f071::t_f304f12976c706 7,20,29,111-121,126-128,144,149-152,182-184
+docs/contract-v0.7.json
+  s_f365f7cae9f071::t_b136ab907c4b72 2
+driver/acp/driver_test.go
+  s_f365f7cae9f071::t_f30fffd65f2b1d 103,151-152,166-167,172-173,175-176,178-179,286,289,297,306,333,336,377,405,444,447,495,498
+driver/acp/session.go
+  s_f365f7cae9f071::t_fc24696c030a52 77,148,151,167-172,249,263-268,279
+driver/claude/driver.go
+  s_f365f7cae9f071::t_d615e2c4c33174 51,92,96,163-164,208,210,221-225,233,299,301,306
+driver/claude/driver_test.go
+  s_f365f7cae9f071::t_771a980e08f854 130,133,207-208,239,242,275,278,292,321,361-362
+driver/codex/driver.go
+  s_f365f7cae9f071::t_2b8f7883d471f4 111,153-154,249,251,261-264,267,281,369,401,420-424,429,481
+driver/codex/driver_test.go
+  s_f365f7cae9f071::t_91c8cf15ca5c04 248,254,306,309,339,346,380,389,440,443,453,480,503,508,521,524,529,542,545,560,563,591,596,604,729
+driver/driver.go
+  s_f365f7cae9f071::t_725e3b3ce4608f 25,190-193,196-198,201-209,264,281,287,300-302,304-305,307-309
+driver/fake/concurrency_test.go
+  s_f365f7cae9f071::t_9f73489a5bfcbe 13,27,37,50,56,65-67,71-73
+driver/fake/fake.go
+  s_f365f7cae9f071::t_3991dfa863a57b 18,32,185-187,211-212,223,228-231,235,299,311,313-316,319,327-333,338
+driver/fake/fake_test.go
+  s_f365f7cae9f071::t_34cf486fb3579b 49,53,56,59,64,66,114,128-129,147,161,183-184,193,206-207
+driver/ids.go
+  s_f365f7cae9f071::t_024590c58dd53f 19
+example_test.go
+  s_f365f7cae9f071::t_a84574c2ddf524 24
+examples/acp/main.go
+  s_f365f7cae9f071::t_4523c09e29ea5a 30
+examples/basic/main.go
+  s_f365f7cae9f071::t_eeb57734ecb741 27
+examples/blocked/main.go
+  s_f365f7cae9f071::t_62024d8d5ca34b 34,46-50
+examples/multi/main.go
+  s_f365f7cae9f071::t_21aa174177ca43 57
+examples/sessions/main.go
+  s_f365f7cae9f071::t_9e094afd24be0a 40
+examples/stream/main.go
+  s_f365f7cae9f071::t_3e2efa45648d60 32
+facade.go
+  s_f365f7cae9f071::t_c3b68fa71fcd17 57-71
+python/CHANGELOG.md
+  s_f365f7cae9f071::t_76c2bccac23eaf 8-9
+python/README.md
+  s_f365f7cae9f071::t_c27e0bddcfbde0 47,62,77,82-83,85-87,90-92,110
+python/examples/basic.py
+  s_f365f7cae9f071::t_b31f4ac91cb1e7 8
+python/examples/blocked.py
+  s_f365f7cae9f071::t_2fce3f9483a988 9,18-21
+python/examples/interrupt.py
+  s_f365f7cae9f071::t_426b6fa1bc08ec 9
+python/examples/stream.py
+  s_f365f7cae9f071::t_b296585197333c 8
+python/src/unio/__init__.py
+  s_f365f7cae9f071::t_9fdbee55add2be 14,23-24,58,71-72
+python/src/unio/_driver.py
+  s_f365f7cae9f071::t_5c7d5d2b2b32bf 15,175,178
+python/src/unio/_drivers/acp.py
+  s_f365f7cae9f071::t_d45ecc472e3d38 31,35-36,412,415-417,431,434-437,445
+python/src/unio/_drivers/claude.py
+  s_f365f7cae9f071::t_f3e1b626bdeacd 34-41,255,258,261-262,269,279
+python/src/unio/_drivers/codex.py
+  s_f365f7cae9f071::t_0d6c7e3623b48c 29,34-35,378,381-382,389,399,402-404,406
+python/src/unio/_drivers/fake.py
+  s_f365f7cae9f071::t_d5a25e632d5ecb 21-28,98,101-103,105,108-117,119
+python/src/unio/_session.py
+  s_f365f7cae9f071::t_2155892cac48d9 9,36-38,41-42,45-49,52-60,62-63
+python/src/unio/models.py
+  s_f365f7cae9f071::t_b19443131ca919 6,38-54
+python/tests/e2e_real/test_acp.py
+  s_f365f7cae9f071::t_6dc0c88268fb57 82,85-89,119,143-145,152-154
+python/tests/e2e_real/test_codex.py
+  s_f365f7cae9f071::t_261664609ec120 52,55-60,93-94,115-117,124-125
+python/tests/test_contract.py
+  s_f365f7cae9f071::t_4fe8c50e414f75 12,18
+session.go
+  s_f365f7cae9f071::t_335529ebde6f06 23,105-109,116-118,126-131,133-148,153-157,163-169,171-175,196
+tests/fake_e2e_test.go
+  s_f365f7cae9f071::t_228ea17690bdd6 56-57,75-77,81
+tests/harness.go
+  s_f365f7cae9f071::t_f2d6e7c85d35c0 2,34-35,79,84,88,106,115,167,201,208-209,219,224,245,247
+tests/real_acp_test.go
+  s_f365f7cae9f071::t_e41e583af0e9b3 40-41,43-59,61,64,151,165,200,221,250-264,268-271,274,289,310,331,346
+tests/real_claude_test.go
+  s_f365f7cae9f071::t_ef8795adee1b8c 34,81,114,153
+tests/real_codex_test.go
+  s_f365f7cae9f071::t_6548322bae67e7 16,29-30,32-41,43-51,53,84,108,146-147,165,180,182,185
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a71a00e7896b9eb9ff509f9f4492cd12fc32053e",
+  "prompts": {},
+  "sessions": {
+    "s_f365f7cae9f071": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6466-eb5a-7962-b8ae-05ac2a874b03",
+        "model": "unknown"
+      },
+      "human_author": "Fullstop000 <fullstop1005@gmail.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
