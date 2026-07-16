@@ -4,6 +4,7 @@ import asyncio
 import json
 from collections.abc import Coroutine
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -126,6 +127,99 @@ def test_acp_updates_map_thinking_tools_and_permission(tmp_path: Path) -> None:
     assert tool.item is not None and tool.item.tool == "shell"
     assert result.item is not None and result.item.kind is OutputKind.TOOL_RESULT
     assert blocked.blocked is not None and blocked.blocked.options[0].value == "yes"
+
+
+def test_acp_submission_failure_restores_active_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def scenario() -> None:
+        spec = AgentSpec(tmp_path, system_prompt="system")
+        config = _Config("traex", "traex", ())
+        process = _ACPProcess("traex", config, spec)
+        session = ACPSession(process, config, spec, "s1")
+        session._id = "s1"
+        session._phase = ProcessPhase.ACTIVE
+
+        async def fail_request(method: str, params: dict[str, Any]) -> Any:
+            raise unio.AgentError(unio.ErrorKind.TRANSPORT, "write failed")
+
+        monkeypatch.setattr(process, "request", fail_request)
+        with pytest.raises(unio.AgentError, match="write failed"):
+            await session.send(unio.UserMessage("hello"))
+        assert session.phase is ProcessPhase.ACTIVE
+        assert session._active_run == ""
+        assert session._first_turn
+
+    run(scenario())
+
+
+@pytest.mark.parametrize("runtime", ["acp", "codex"])
+def test_initialization_failure_allows_retry(
+    runtime: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def scenario() -> None:
+        spec = AgentSpec(tmp_path)
+        child = SimpleNamespace(stdout=None, stderr=None, returncode=1)
+
+        async def spawn(*args: Any, **kwargs: Any) -> Any:
+            return child
+
+        async def fail_initialize(*args: Any, **kwargs: Any) -> Any:
+            raise unio.AgentError(unio.ErrorKind.PROTOCOL, "initialize failed")
+
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn)
+        if runtime == "acp":
+            process = _ACPProcess("traex", _Config("traex", "traex", ()), spec)
+            monkeypatch.setattr(process, "call", fail_initialize)
+        else:
+            process = _CodexProcess("codex", spec)
+            monkeypatch.setattr(process, "request", fail_initialize)
+
+        with pytest.raises(unio.AgentError, match="initialize failed"):
+            await process.start()
+        assert process._process is None
+        assert process._reader is None
+        assert process._stderr is None
+
+    run(scenario())
+
+
+@pytest.mark.parametrize("runtime", ["acp", "codex"])
+def test_blocked_response_failure_remains_retryable(
+    runtime: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def scenario() -> None:
+        spec = AgentSpec(tmp_path)
+
+        async def fail_respond(request_id: Any, result: Any) -> None:
+            raise unio.AgentError(unio.ErrorKind.TRANSPORT, "write failed")
+
+        if runtime == "acp":
+            config = _Config("traex", "traex", ())
+            process = _ACPProcess("traex", config, spec)
+            session = ACPSession(process, config, spec, "s1")
+            session._permission_id = 7
+            session._permission_options = {"allow_once"}
+        else:
+            process = _CodexProcess("codex", spec)
+            session = CodexSession(process, spec, tmp_path, "s1")
+            session._approval_id = 7
+        session._id = "s1"
+        session._phase = ProcessPhase.BLOCKED
+        monkeypatch.setattr(process, "respond", fail_respond)
+
+        with pytest.raises(unio.AgentError, match="write failed"):
+            await session.respond(unio.OptionSelection("allow_once"))
+        assert session.phase is ProcessPhase.BLOCKED
+        assert session._active_run == ""
+        if runtime == "acp":
+            assert isinstance(session, ACPSession)
+            assert session._permission_id == 7
+        else:
+            assert isinstance(session, CodexSession)
+            assert session._approval_id == 7
+
+    run(scenario())
 
 
 def test_acp_stream_limit_accepts_large_single_line_responses() -> None:

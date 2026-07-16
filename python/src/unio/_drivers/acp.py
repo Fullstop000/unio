@@ -166,28 +166,35 @@ class _ACPProcess:
                 raise transport(f"acp: start {self._config.name}: {error}") from error
             self._reader = asyncio.create_task(self._read_loop())
             self._stderr = asyncio.create_task(self._drain_stderr())
-            result = await self.call(
-                "initialize",
-                {
-                    "protocolVersion": 1,
-                    "clientCapabilities": {},
-                    "clientInfo": {
-                        "name": "unio",
-                        "title": "unio",
-                        "version": "0.1.0",
+            try:
+                result = await self.call(
+                    "initialize",
+                    {
+                        "protocolVersion": 1,
+                        "clientCapabilities": {},
+                        "clientInfo": {
+                            "name": "unio",
+                            "title": "unio",
+                            "version": "0.1.0",
+                        },
                     },
-                },
-            )
-            if int(result.get("protocolVersion") or 0) != 1:
-                raise unsupported("acp: runtime selected unsupported protocol version")
-            agent = _object(result.get("agentCapabilities"))
-            session = _object(agent.get("sessionCapabilities"))
-            self.capabilities = {
-                "load": bool(agent.get("loadSession")),
-                "list": session.get("list") is not None,
-                "resume": session.get("resume") is not None,
-                "close": session.get("close") is not None,
-            }
+                )
+                if int(result.get("protocolVersion") or 0) != 1:
+                    raise unsupported("acp: runtime selected unsupported protocol version")
+                agent = _object(result.get("agentCapabilities"))
+                session = _object(agent.get("sessionCapabilities"))
+                self.capabilities = {
+                    "load": bool(agent.get("loadSession")),
+                    "list": session.get("list") is not None,
+                    "resume": session.get("resume") is not None,
+                    "close": session.get("close") is not None,
+                }
+            except BaseException:
+                await self.close()
+                self._process = None
+                self._reader = None
+                self._stderr = None
+                raise
 
     async def call(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         _, future = await self.request(method, params)
@@ -415,16 +422,23 @@ class ACPSession(DriverSession):
         if not isinstance(value, UserMessage):
             raise invalid_state("acp: a new turn requires UserMessage")
         text = value.text
-        if self._first_turn and self._spec.system_prompt:
+        first_turn = self._first_turn
+        if first_turn and self._spec.system_prompt:
             text = f"{self._spec.system_prompt}\n\n{text}"
         self._first_turn = False
         run_id = new_run_id()
         self._active_run = run_id
         self._phase = ProcessPhase.PROMPT_IN_FLIGHT
-        _, future = await self._process.request(
-            "session/prompt",
-            {"sessionId": self._id, "prompt": [{"type": "text", "text": text}]},
-        )
+        try:
+            _, future = await self._process.request(
+                "session/prompt",
+                {"sessionId": self._id, "prompt": [{"type": "text", "text": text}]},
+            )
+        except BaseException:
+            self._active_run = ""
+            self._phase = ProcessPhase.ACTIVE
+            self._first_turn = first_turn
+            raise
         self._prompt_task = asyncio.create_task(self._finish_prompt(future))
         return run_id
 
@@ -440,10 +454,16 @@ class ACPSession(DriverSession):
         request_id = self._permission_id
         self._permission_id = None
         self._phase = ProcessPhase.PROMPT_IN_FLIGHT
-        await self._process.respond(
-            request_id,
-            {"outcome": {"outcome": "selected", "optionId": value.value}},
-        )
+        try:
+            await self._process.respond(
+                request_id,
+                {"outcome": {"outcome": "selected", "optionId": value.value}},
+            )
+        except BaseException:
+            self._active_run = ""
+            self._permission_id = request_id
+            self._phase = ProcessPhase.BLOCKED
+            raise
         return run_id
 
     async def interrupt(self) -> None:

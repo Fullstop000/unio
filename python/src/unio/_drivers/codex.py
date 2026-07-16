@@ -210,14 +210,25 @@ class _CodexProcess:
                 raise transport(f"codex: start app-server: {error}") from error
             self._reader = asyncio.create_task(self._read_loop())
             self._stderr = asyncio.create_task(self._drain_stderr())
-            await self.request(
-                "initialize",
-                {
-                    "clientInfo": {"name": "unio", "title": "unio", "version": "0.1.0"},
-                    "capabilities": {},
-                },
-            )
-            await self.notify("initialized", {})
+            try:
+                await self.request(
+                    "initialize",
+                    {
+                        "clientInfo": {
+                            "name": "unio",
+                            "title": "unio",
+                            "version": "0.1.0",
+                        },
+                        "capabilities": {},
+                    },
+                )
+                await self.notify("initialized", {})
+            except BaseException:
+                await self.close()
+                self._process = None
+                self._reader = None
+                self._stderr = None
+                raise
 
     async def request(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         self._next_id += 1
@@ -409,7 +420,13 @@ class CodexSession(DriverSession):
         approval_id = self._approval_id
         self._approval_id = None
         self._phase = ProcessPhase.PROMPT_IN_FLIGHT
-        await self._process.respond(approval_id, decision)
+        try:
+            await self._process.respond(approval_id, decision)
+        except BaseException:
+            self._active_run = ""
+            self._approval_id = approval_id
+            self._phase = ProcessPhase.BLOCKED
+            raise
         return run_id
 
     async def interrupt(self) -> None:

@@ -5,13 +5,13 @@ on:
     branches: [master]
     paths:
       - "python/**"
-      - "docs/contract-v0.6.json"
+      - "docs/contract.json"
       - ".github/workflows/python-ci.yml"
   pull_request:
     branches: [master]
     paths:
       - "python/**"
-      - "docs/contract-v0.6.json"
+      - "docs/contract.json"
       - ".github/workflows/python-ci.yml"
 
 permissions:
