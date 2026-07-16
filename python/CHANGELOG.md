@@ -7,3 +7,5 @@
 - Fixed OpenCode ACP sessions whose model catalog exceeds asyncio's default stream limit.
 - Replaced `continue_` and raw string submissions with state-aware `run`/`stream`
   accepting `UserMessage` or `OptionSelection`.
+- Kept sessions reusable after submission failures, initialization failures, and
+  interruption while Codex is waiting for approval.

@@ -11,10 +11,11 @@ while package versions evolve independently.
 
 ## Go SDK
 
-unio v0.2 requires Go 1.23 or newer. The supported caller-facing packages are
-the root `unio` package and `errs`; packages under `driver` are pre-1.0 adapter
-APIs. v0.1 compatibility and migration guidance are intentionally not
-maintained.
+The Go examples in this branch describe the unreleased API planned for the next
+pre-1.0 minor release and require Go 1.23 or newer. The latest published Go API
+is v0.2.0; use its [versioned documentation](https://github.com/Fullstop000/unio/tree/v0.2.0)
+when staying on that tag. The supported caller-facing packages are the root
+`unio` package and `errs`; packages under `driver` are pre-1.0 adapter APIs.
 
 See the [documentation index](docs/README.md) for the support matrix, behavior
 specification, error guide, and stability boundaries.
@@ -48,8 +49,11 @@ example](examples/acp/main.go) for Kimi, TraeX, and OpenCode.
 ## Install
 
 ```sh
-go get github.com/Fullstop000/unio@v0.2.0
+go get github.com/Fullstop000/unio@master
 ```
+
+This installs the current unreleased API shown below. Published releases should
+use an exact tag and the documentation from that tag.
 
 ## Run a task
 

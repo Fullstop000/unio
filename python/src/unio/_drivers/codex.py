@@ -347,6 +347,7 @@ class CodexSession(DriverSession):
         self._phase = ProcessPhase.IDLE
         self._active_run = ""
         self._turn_id = ""
+        self._turn_done: asyncio.Event | None = None
         self._approval_id: Any = None
         self._usage: TokenUsage | None = None
 
@@ -393,6 +394,7 @@ class CodexSession(DriverSession):
             raise invalid_state("codex: a new turn requires UserMessage")
         run_id = new_run_id()
         self._active_run = run_id
+        self._turn_done = asyncio.Event()
         self._phase = ProcessPhase.PROMPT_IN_FLIGHT
         try:
             result = await self._process.request(
@@ -401,6 +403,7 @@ class CodexSession(DriverSession):
             )
         except Exception:
             self._active_run = ""
+            self._turn_done = None
             self._phase = ProcessPhase.ACTIVE
             raise
         self._turn_id = str(_object(result.get("turn")).get("id") or self._turn_id)
@@ -432,10 +435,13 @@ class CodexSession(DriverSession):
     async def interrupt(self) -> None:
         if self._phase not in {ProcessPhase.PROMPT_IN_FLIGHT, ProcessPhase.BLOCKED}:
             return
+        turn_done = self._turn_done
         if self._turn_id:
             await self._process.request(
                 "turn/interrupt", {"threadId": self._id, "turnId": self._turn_id}
             )
+        if turn_done is not None:
+            await turn_done.wait()
 
     async def raw(self) -> RawSessionData:
         path = await asyncio.to_thread(_find_session_file, self._id or self._resume_id)
@@ -532,29 +538,35 @@ class CodexSession(DriverSession):
 
     def _finish(self, turn: dict[str, Any]) -> None:
         run_id = self._active_run
-        if not run_id:
-            return
-        self._emit(OutputItem(OutputKind.TURN_END))
-        status = str(turn.get("status") or "completed")
-        if status == "failed":
-            message = str(_object(turn.get("error")).get("message") or "turn failed")
-            self.events.emit(
-                DriverEvent(
-                    DriverEventType.FAILED, self._id, run_id, error=runtime_reported(message)
+        if run_id:
+            self._emit(OutputItem(OutputKind.TURN_END))
+            status = str(turn.get("status") or "completed")
+            if status == "failed":
+                message = str(_object(turn.get("error")).get("message") or "turn failed")
+                self.events.emit(
+                    DriverEvent(
+                        DriverEventType.FAILED, self._id, run_id, error=runtime_reported(message)
+                    )
                 )
-            )
-        else:
-            finish = FinishReason.CANCELLED if status == "interrupted" else FinishReason.NATURAL
-            usage = {self._spec.model or "codex": self._usage} if self._usage else {}
-            self.events.emit(
-                DriverEvent(
-                    DriverEventType.COMPLETED, self._id, run_id, result=RunResult(finish, usage)
+            else:
+                finish = FinishReason.CANCELLED if status == "interrupted" else FinishReason.NATURAL
+                usage = {self._spec.model or "codex": self._usage} if self._usage else {}
+                self.events.emit(
+                    DriverEvent(
+                        DriverEventType.COMPLETED,
+                        self._id,
+                        run_id,
+                        result=RunResult(finish, usage),
+                    )
                 )
-            )
         self._active_run = ""
         self._turn_id = ""
+        self._approval_id = None
         self._usage = None
         self._phase = ProcessPhase.ACTIVE
+        if self._turn_done is not None:
+            self._turn_done.set()
+            self._turn_done = None
 
     def _emit(self, item: OutputItem) -> None:
         self.events.emit(DriverEvent(DriverEventType.OUTPUT, self._id, self._active_run, item=item))
@@ -570,4 +582,7 @@ class CodexSession(DriverSession):
                 )
             )
             self._active_run = ""
+        if self._turn_done is not None:
+            self._turn_done.set()
+            self._turn_done = None
         self._phase = ProcessPhase.CLOSED

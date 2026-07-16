@@ -505,6 +505,14 @@ func TestCloseAfterLifecycleCancellationStillReleasesSession(t *testing.T) {
 	if state := att.Session.ProcessState(); state.Phase != driver.PhaseClosed {
 		t.Fatalf("state after Close = %+v", state)
 	}
+	d.mu.Lock()
+	proc := d.process
+	d.mu.Unlock()
+	select {
+	case <-proc.closed:
+	default:
+		t.Fatal("Close returned before the ACP process was reaped")
+	}
 }
 
 func waitEvent(t *testing.T, events <-chan driver.AgentEvent, typ driver.EventType) driver.AgentEvent {

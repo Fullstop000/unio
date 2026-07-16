@@ -362,9 +362,12 @@ func (s *session) Close() error {
 	if id != "" {
 		s.proc.unregisterSession(id)
 	}
-	s.proc.release(s)
+	wait := s.proc.release(s)
 	s.setState(driver.ProcessState{Phase: driver.PhaseClosed, SessionID: id})
 	s.bus.Close()
+	if wait {
+		<-s.proc.closed
+	}
 	return errors.Join(interruptErr, closeErr)
 }
 

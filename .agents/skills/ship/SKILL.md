@@ -152,11 +152,14 @@ Suggest the next SemVer version from the aggregate release contents, not only th
 - backward-compatible user-facing capability: minor;
 - compatible fix, docs, maintenance, or internal change: patch.
 
-Ask with the exact suggestion: “PR is green. Keep these entries under `Unreleased`, or prepare `vX.Y.Z` and tag the merged result?” The suggestion does not authorize a bump.
+Ask with the exact target-aware suggestion: “PR is green. Keep these entries
+under `Unreleased`, or prepare `<tag>` and tag the merged result?” Use `vX.Y.Z`
+for Go and `python-vX.Y.Z` for Python. The suggestion does not authorize a bump.
 
 ### PR only
 
-Leave the entries under `## Unreleased`. Do not create or change a version elsewhere; unio has no such file.
+Leave the entries under `## Unreleased`. Do not change Go or Python version
+metadata for a PR-only ship.
 
 ### Go release
 
@@ -181,7 +184,8 @@ Verify `python-vX.Y.Z` is absent locally and remotely. Set the exact version in
 `python/pyproject.toml`, keep a new `## Unreleased` section, and move pending
 entries to `## X.Y.Z - YYYY-MM-DD` in `python/CHANGELOG.md`. Confirm the PyPI
 pending Trusted Publisher and protected GitHub `pypi` environment exist before
-merge. Commit release preparation on the same PR and rerun all Python gates.
+merge. Confirm CI package-version checks derive from `python/pyproject.toml`.
+Commit release preparation on the same PR and rerun all Python gates.
 
 ## 6. Obtain merge approval
 

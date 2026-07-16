@@ -23,7 +23,7 @@ Real E2E evidence:
 - [ ] The requested release tag is absent locally and remotely, or this is PR-only
 - [ ] GoDoc/Python docstrings, runnable examples, and user docs are updated, or no update is required
 - [ ] `docs/SPEC.md` and `docs/API_SUPPORT.md` are updated, or no observable contract/capability changed
-- [ ] `CHANGELOG.md` includes the user-visible change, or the change has no user-facing/release-operational effect
+- [ ] The affected SDK changelog includes the user-visible change (`CHANGELOG.md` for Go, `python/CHANGELOG.md` for Python), or no changelog update is required
 - [ ] Compatibility risk is described below, including `None` when applicable
 
 Compatibility notes:

@@ -97,6 +97,7 @@ func (d *Driver) Close() error {
 	d.mu.Unlock()
 	if proc != nil {
 		proc.shutdown()
+		<-proc.closed
 	}
 	return nil
 }

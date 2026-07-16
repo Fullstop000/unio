@@ -70,7 +70,9 @@ If real tests were not run, say so explicitly and explain why.
 - Add or update GoDoc for every exported identifier and field affected.
 - Update `README.md` or a runnable example when the normal caller workflow
   changes.
-- Add one concise, user-facing bullet under `## Unreleased` in `CHANGELOG.md`.
+- Add one concise, user-facing bullet under `## Unreleased` in the affected SDK
+  changelog: root `CHANGELOG.md` for Go, `python/CHANGELOG.md` for Python, or
+  both for a shared change.
 
 ### Cross-language contract
 

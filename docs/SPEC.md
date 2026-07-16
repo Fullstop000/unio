@@ -153,8 +153,10 @@ in `blocked`. Blocking is normal control flow, not an error.
 when no options are available. A valid response moves the Session back to
 running.
 
-Partial text, thinking, tool calls, and usage produced before blocking or
-interruption remain in the Result.
+Partial text, thinking, tool calls, and usage delivered before blocking or
+interruption remain in the Result. Implementations may use bounded event
+delivery; when intermediate events are dropped for a slow consumer, the Result
+may be incomplete and must not be treated as an audit log.
 
 ### Token usage and session statistics
 

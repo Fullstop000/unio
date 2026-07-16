@@ -53,7 +53,9 @@ jobs:
         run: python -m build
       - working-directory: python
         run: twine check dist/*
+      - name: Read package version
+        run: echo "PACKAGE_VERSION=$(python -c 'import tomllib; print(tomllib.load(open("python/pyproject.toml", "rb"))["project"]["version"])')" >> "$GITHUB_ENV"
       - run: python -m pip install --force-reinstall --no-deps python/dist/*.whl
-      - run: python -c "import unio; from unio import Agent, AgentError, Session, Stream; assert unio.__version__ == '0.1.0'"
+      - run: python -c "import os, unio; from unio import Agent, AgentError, Session, Stream; assert unio.__version__ == os.environ['PACKAGE_VERSION']"
       - run: python -m pip install --force-reinstall --no-deps python/dist/*.tar.gz
-      - run: python -c "import unio; assert unio.__version__ == '0.1.0'"
+      - run: python -c "import os, unio; assert unio.__version__ == os.environ['PACKAGE_VERSION']"

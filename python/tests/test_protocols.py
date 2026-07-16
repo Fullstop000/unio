@@ -222,6 +222,44 @@ def test_blocked_response_failure_remains_retryable(
     run(scenario())
 
 
+def test_codex_blocked_interrupt_waits_for_completion_and_allows_reuse(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def scenario() -> None:
+        spec = AgentSpec(tmp_path)
+        process = _CodexProcess("codex", spec)
+        session = CodexSession(process, spec, tmp_path, "s1")
+        session._id = "s1"
+        session._turn_id = "turn-1"
+        session._turn_done = asyncio.Event()
+        session._approval_id = 7
+        session._phase = ProcessPhase.BLOCKED
+
+        async def request(method: str, params: dict[str, Any]) -> dict[str, Any]:
+            if method == "turn/interrupt":
+                session._handle(
+                    "turn/completed",
+                    None,
+                    {"turn": {"id": "turn-1", "status": "interrupted"}},
+                )
+                return {}
+            assert method == "turn/start"
+            return {"turn": {"id": "turn-2"}}
+
+        monkeypatch.setattr(process, "request", request)
+        await session.interrupt()
+        assert session.phase is ProcessPhase.ACTIVE
+        assert session._approval_id is None
+        assert session._turn_id == ""
+
+        run_id = await session.send(unio.UserMessage("next"))
+        assert run_id
+        assert session.phase is ProcessPhase.PROMPT_IN_FLIGHT
+        assert session._turn_id == "turn-2"
+
+    run(scenario())
+
+
 def test_acp_stream_limit_accepts_large_single_line_responses() -> None:
     # OpenCode includes its complete model catalog in session/new. That JSON-RPC
     # response can exceed asyncio's 64 KiB default StreamReader limit.
