@@ -1,0 +1,27 @@
+.github/workflows/python-ci.yml
+  s_f365f7cae9f071::t_c336c014bd16f7 8,14
+python/src/unio/_drivers/acp.py
+  s_f365f7cae9f071::t_a12fa57e4ca6e6 169-179,181-197,425-426,432-441,457-466
+python/src/unio/_drivers/codex.py
+  s_f365f7cae9f071::t_d2eef8f306b6c2 213-231,423-429
+python/tests/test_protocols.py
+  s_f365f7cae9f071::t_c79b5e8681f533 7,132-224
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "68b954d3fc9a7d91de29711adefb46962d0dc602",
+  "prompts": {},
+  "sessions": {
+    "s_f365f7cae9f071": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6466-eb5a-7962-b8ae-05ac2a874b03",
+        "model": "unknown"
+      },
+      "human_author": "Fullstop000 <fullstop1005@gmail.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
