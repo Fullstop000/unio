@@ -79,8 +79,8 @@ blocked reason, error kind, data format, or other observable behavior requires:
 
 - a specification version bump;
 - matching implementation and tests;
-- a matching update to `docs/contract-v0.7.json` (renamed for the new spec
-  version) and passing contract tests in both SDKs;
+- a matching update to `docs/contract.json`, including its `spec_version`, and
+  passing contract tests in both SDKs;
 - an update to `docs/API_SUPPORT.md` when runtime support differs; and
 - a clear compatibility note in the pull request and changelog when existing
   callers must change. A dedicated migration document is added only when the

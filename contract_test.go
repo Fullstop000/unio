@@ -11,7 +11,7 @@ import (
 )
 
 func TestFrozenValuesMatchContractManifest(t *testing.T) {
-	data, err := os.ReadFile("docs/contract-v0.7.json")
+	data, err := os.ReadFile("docs/contract.json")
 	if err != nil {
 		t.Fatal(err)
 	}

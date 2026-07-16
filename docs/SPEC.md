@@ -26,7 +26,9 @@ Runtime attach and resume are automatic. There is no public `Session.Close` or
 ## 2. Frozen values
 
 The machine-readable mirror used by implementation tests is
-[`contract-v0.7.json`](contract-v0.7.json). This document remains normative.
+[`contract.json`](contract.json). This document remains normative. Its
+`spec_version` identifies the specification revision; the filename remains
+stable across revisions.
 
 ### Agent kind
 

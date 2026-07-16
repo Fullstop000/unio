@@ -9,7 +9,7 @@ from unio._driver import DriverEventType, DriverTransport, FinishReason, Process
 
 
 def _contract() -> dict[str, list[str] | str]:
-    path = Path(__file__).parents[2] / "docs" / "contract-v0.7.json"
+    path = Path(__file__).parents[2] / "docs" / "contract.json"
     return cast(dict[str, list[str] | str], json.loads(path.read_text(encoding="utf-8")))
 
 
